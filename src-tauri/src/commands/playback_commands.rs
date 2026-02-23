@@ -1,0 +1,333 @@
+use crate::audio::player::AudioPlayer;
+use crate::audio::stream_source::HttpStreamSource;
+use crate::error::AppError;
+use crate::events::{PlaybackState, StateChangedPayload, TrackChangedPayload};
+use serde::Serialize;
+use tauri::{Emitter, State};
+
+use crate::AppState;
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlayerPrefs {
+    pub volume: f32,
+    pub muted: bool,
+}
+
+#[tauri::command]
+pub async fn play_track(
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+    track_id: String,
+) -> Result<(), AppError> {
+    log::info!("[play_track] track_id={}", track_id);
+    let track = state.tidal_client.get_track(&track_id).await?;
+    {
+        let mut pl = state.preloaded_track.lock().await;
+        *pl = None;
+    }
+    play_track_internal(&state, &app, &track).await
+}
+
+/// Play a list of tracks, setting them as the queue with a starting index.
+#[tauri::command]
+pub async fn play_tracks(
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+    tracks: Vec<crate::api::models::Track>,
+    start_index: usize,
+) -> Result<(), AppError> {
+    log::info!(
+        "[play_tracks] {} tracks, start_index={}",
+        tracks.len(),
+        start_index
+    );
+    {
+        let mut pl = state.preloaded_track.lock().await;
+        *pl = None;
+    }
+
+    let mut queue = state.playback_queue.write().await;
+    queue.set_tracks(tracks, start_index);
+    let track = queue.current_track().cloned();
+    drop(queue);
+
+    if let Some(track) = track {
+        log::info!("[play_tracks] Playing: {} - {}", track.artist_name, track.title);
+        play_track_internal(&state, &app, &track).await?;
+        let _ = app.emit(crate::events::PLAYBACK_QUEUE_CHANGED, ());
+    } else {
+        log::warn!("[play_tracks] No track at index {}", start_index);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn pause(state: State<'_, AppState>, app: tauri::AppHandle) -> Result<(), AppError> {
+    let mut player = state.audio_player.write().await;
+    player.pause();
+
+    let _ = app.emit(
+        crate::events::PLAYBACK_STATE_CHANGED,
+        StateChangedPayload {
+            state: PlaybackState::Paused,
+        },
+    );
+
+    if let Some(track) = state.current_track.read().await.as_ref() {
+        let position = player.position_seconds();
+        crate::macos::now_playing::update_now_playing(
+            &track.title,
+            &track.artist_name,
+            &track.album_name,
+            track.duration,
+            position,
+            false,
+        );
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn resume(state: State<'_, AppState>, app: tauri::AppHandle) -> Result<(), AppError> {
+    let mut player = state.audio_player.write().await;
+    player.resume();
+
+    let _ = app.emit(
+        crate::events::PLAYBACK_STATE_CHANGED,
+        StateChangedPayload {
+            state: PlaybackState::Playing,
+        },
+    );
+
+    if let Some(track) = state.current_track.read().await.as_ref() {
+        let position = player.position_seconds();
+        crate::macos::now_playing::update_now_playing(
+            &track.title,
+            &track.artist_name,
+            &track.album_name,
+            track.duration,
+            position,
+            true,
+        );
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn stop(state: State<'_, AppState>, app: tauri::AppHandle) -> Result<(), AppError> {
+    let mut player = state.audio_player.write().await;
+    player.stop();
+
+    *state.current_track.write().await = None;
+
+    let _ = app.emit(
+        crate::events::PLAYBACK_STATE_CHANGED,
+        StateChangedPayload {
+            state: PlaybackState::Stopped,
+        },
+    );
+
+    crate::macos::now_playing::clear_now_playing();
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn seek(state: State<'_, AppState>, position: f64) -> Result<(), AppError> {
+    let mut player = state.audio_player.write().await;
+    player.seek(position);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn set_volume(state: State<'_, AppState>, volume: f32) -> Result<(), AppError> {
+    let player = state.audio_player.read().await;
+    player.set_volume(volume);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_volume(state: State<'_, AppState>) -> Result<f32, AppError> {
+    let player = state.audio_player.read().await;
+    Ok(player.volume())
+}
+
+#[tauri::command]
+pub async fn get_playback_state(state: State<'_, AppState>) -> Result<String, AppError> {
+    let player = state.audio_player.read().await;
+    if player.is_playing() {
+        Ok("playing".to_string())
+    } else {
+        Ok("paused".to_string())
+    }
+}
+
+#[tauri::command]
+pub async fn next_track(state: State<'_, AppState>, app: tauri::AppHandle) -> Result<(), AppError> {
+    let mut queue = state.playback_queue.write().await;
+    let next = queue.next_track().cloned();
+    drop(queue);
+
+    match next {
+        Some(track) => play_track_internal(&state, &app, &track).await,
+        None => {
+            let mut player = state.audio_player.write().await;
+            player.stop();
+            drop(player);
+            *state.current_track.write().await = None;
+            let _ = app.emit(
+                crate::events::PLAYBACK_STATE_CHANGED,
+                StateChangedPayload {
+                    state: PlaybackState::Stopped,
+                },
+            );
+            crate::macos::now_playing::clear_now_playing();
+            Ok(())
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn previous_track(
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> Result<(), AppError> {
+    let player = state.audio_player.read().await;
+    let position = player.position_seconds();
+    drop(player);
+
+    if position > 15.0 {
+        let current = state.current_track.read().await.clone();
+        if let Some(track) = current {
+            play_track_internal(&state, &app, &track).await?;
+        }
+    } else {
+        let mut queue = state.playback_queue.write().await;
+        let prev = queue.previous_track().cloned();
+        drop(queue);
+
+        if let Some(track) = prev {
+            play_track_internal(&state, &app, &track).await?;
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_player_prefs(state: State<'_, AppState>) -> Result<PlayerPrefs, AppError> {
+    let config = state.tidal_client.config().read().await;
+    Ok(PlayerPrefs {
+        volume: config.volume,
+        muted: config.muted,
+    })
+}
+
+#[tauri::command]
+pub async fn save_player_prefs(
+    state: State<'_, AppState>,
+    volume: f32,
+    muted: bool,
+) -> Result<(), AppError> {
+    let mut config = state.tidal_client.config().write().await;
+    config.volume = volume;
+    config.muted = muted;
+    config.save()?;
+    Ok(())
+}
+
+/// Internal helper to start playing a track (used by next/previous/play commands)
+async fn play_track_internal(
+    state: &State<'_, AppState>,
+    app: &tauri::AppHandle,
+    track: &crate::api::models::Track,
+) -> Result<(), AppError> {
+    log::info!(
+        "[play_track_internal] Starting: id={} title={} artist={}",
+        track.id, track.title, track.artist_name
+    );
+
+    // Check for preloaded track first
+    let preloaded = {
+        let mut pl = state.preloaded_track.lock().await;
+        pl.take()
+    };
+
+    if let Some(preloaded) = preloaded.filter(|p| p.track_id == track.id) {
+        log::info!("[play_track_internal] Using preloaded track");
+        let codec_hint = preloaded.codec_hint.as_deref();
+        let mut player = state.audio_player.write().await;
+        player.play_stream(preloaded.source, codec_hint, preloaded.duration)?;
+    } else {
+        // Fetch manifest (contains both URI and codec) and play
+        log::info!("[play_track_internal] Fetching manifest for track {}", track.id);
+        let manifest = state.tidal_client.get_track_manifest(&track.id).await?;
+        log::info!(
+            "[play_track_internal] Got manifest: codec={}, uri={}...",
+            manifest.codec,
+            &manifest.uri[..manifest.uri.len().min(80)]
+        );
+
+        let (source, writer) = HttpStreamSource::new();
+        let client = state.tidal_client.http_client().clone();
+
+        // Start the download on a background task
+        AudioPlayer::start_download(writer, manifest.uri, client);
+
+        // CRITICAL: play_stream blocks the thread while AudioDecoder probes the format.
+        // We must use spawn_blocking so we don't block a tokio worker thread,
+        // which would prevent the download task from making progress.
+        log::info!("[play_track_internal] Starting play_stream (via spawn_blocking)...");
+        let player_ref = state.audio_player.clone();
+        let codec = manifest.codec.clone();
+        let duration = track.duration;
+
+        let result = tokio::task::spawn_blocking(move || {
+            // We need to acquire the write lock inside the blocking task.
+            // Use tokio's Handle to enter the async context for the lock.
+            let rt = tokio::runtime::Handle::current();
+            let mut player = rt.block_on(player_ref.write());
+            player.play_stream(source, Some(&codec), duration)
+        })
+        .await
+        .map_err(|e| AppError::Audio(format!("spawn_blocking join error: {}", e)))?;
+
+        result?;
+        log::info!("[play_track_internal] play_stream succeeded");
+    }
+
+    *state.current_track.write().await = Some(track.clone());
+
+    let _ = app.emit(
+        crate::events::PLAYBACK_TRACK_CHANGED,
+        TrackChangedPayload {
+            track_id: track.id.clone(),
+            title: track.title.clone(),
+            artist: track.artist_name.clone(),
+            album: track.album_name.clone(),
+            duration: track.duration,
+            artwork_url: track.artwork_url_sized(480, 480),
+        },
+    );
+
+    let _ = app.emit(
+        crate::events::PLAYBACK_STATE_CHANGED,
+        StateChangedPayload {
+            state: PlaybackState::Playing,
+        },
+    );
+
+    crate::macos::now_playing::update_now_playing(
+        &track.title,
+        &track.artist_name,
+        &track.album_name,
+        track.duration,
+        0.0,
+        true,
+    );
+
+    log::info!("[play_track_internal] Track playing, events emitted");
+    Ok(())
+}
