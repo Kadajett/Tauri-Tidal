@@ -365,7 +365,7 @@ pub fn run() {
                                 if let Some(next_trk) = next {
                                     match client.get_track_manifest(&next_trk.id).await {
                                         Ok(manifest) => {
-                                            let (source, writer) =
+                                            let (source, writer, abort_handle) =
                                                 audio::stream_source::HttpStreamSource::new();
                                             AudioPlayer::start_download(
                                                 writer,
@@ -379,7 +379,7 @@ pub fn run() {
                                             let result = tokio::task::spawn_blocking(move || {
                                                 let rt = tokio::runtime::Handle::current();
                                                 let mut p = rt.block_on(player_ref.write());
-                                                p.play_stream(source, Some(&codec), duration)
+                                                p.play_stream(source, abort_handle, Some(&codec), duration)
                                             })
                                             .await;
                                             match result {
@@ -457,7 +457,7 @@ pub fn run() {
                                     if let Some(current) = track_ref.read().await.clone() {
                                         match client.get_track_manifest(&current.id).await {
                                             Ok(manifest) => {
-                                                let (source, writer) =
+                                                let (source, writer, abort_handle) =
                                                     audio::stream_source::HttpStreamSource::new();
                                                 AudioPlayer::start_download(
                                                     writer,
@@ -471,7 +471,7 @@ pub fn run() {
                                                     tokio::task::spawn_blocking(move || {
                                                         let rt = tokio::runtime::Handle::current();
                                                         let mut p = rt.block_on(player_ref.write());
-                                                        p.play_stream(source, Some(&codec), dur)
+                                                        p.play_stream(source, abort_handle, Some(&codec), dur)
                                                     })
                                                     .await;
                                                 if let Err(e) = result.unwrap_or_else(|e| {
@@ -508,7 +508,7 @@ pub fn run() {
                                     if let Some(prev_trk) = prev {
                                         match client.get_track_manifest(&prev_trk.id).await {
                                             Ok(manifest) => {
-                                                let (source, writer) =
+                                                let (source, writer, abort_handle) =
                                                     audio::stream_source::HttpStreamSource::new();
                                                 AudioPlayer::start_download(
                                                     writer,
@@ -522,7 +522,7 @@ pub fn run() {
                                                     tokio::task::spawn_blocking(move || {
                                                         let rt = tokio::runtime::Handle::current();
                                                         let mut p = rt.block_on(player_ref.write());
-                                                        p.play_stream(source, Some(&codec), dur)
+                                                        p.play_stream(source, abort_handle, Some(&codec), dur)
                                                     })
                                                     .await;
                                                 match result {
@@ -602,6 +602,17 @@ pub fn run() {
                     let position = player.position_seconds();
                     let duration = player.duration_seconds();
                     drop(player);
+
+                    // Debug: log state near end of track
+                    if duration > 0.0 && position > 0.0 {
+                        let remaining = duration - position;
+                        if remaining < 5.0 || is_finished {
+                            log::info!(
+                                "[progress] pos={:.1} dur={:.1} rem={:.1} playing={} finished={}",
+                                position, duration, remaining, is_playing, is_finished,
+                            );
+                        }
+                    }
 
                     if is_playing {
                         let fraction = if duration > 0.0 {
@@ -705,6 +716,7 @@ pub fn run() {
                                     let codec_hint = preloaded.codec_hint.as_deref();
                                     player.play_stream(
                                         preloaded.source,
+                                        preloaded.abort_handle,
                                         codec_hint,
                                         preloaded.duration,
                                     )
@@ -728,7 +740,7 @@ pub fn run() {
                                 let client = &client_for_progress;
                                 match client.get_track_manifest(&next_track.id).await {
                                     Ok(manifest) => {
-                                        let (source, writer) =
+                                        let (source, writer, abort_handle) =
                                             audio::stream_source::HttpStreamSource::new();
                                         AudioPlayer::start_download(
                                             writer,
@@ -746,6 +758,7 @@ pub fn run() {
                                             let mut player = rt.block_on(player_ref.write());
                                             player.play_stream(
                                                 source,
+                                                abort_handle,
                                                 Some(&codec),
                                                 duration,
                                             )

@@ -1,5 +1,5 @@
 use crate::audio::decoder::AudioDecoder;
-use crate::audio::stream_source::{HttpStreamSource, StreamWriter};
+use crate::audio::stream_source::{HttpStreamSource, StreamAbortHandle, StreamWriter};
 use crate::error::{AppError, AppResult};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use std::collections::VecDeque;
@@ -47,6 +47,13 @@ pub struct AudioPlayer {
     /// Seek target in milliseconds (NO_SEEK = no pending seek).
     /// The decode thread reads and clears this.
     seek_target_ms: Arc<AtomicU64>,
+    /// Saved samples_played value before the most recent seek.
+    /// The decode thread restores this on seek failure so the UI
+    /// position doesn't desync.
+    pre_seek_samples: Arc<AtomicU64>,
+    /// Abort handle for the current stream source, used to unblock
+    /// the decode thread if it's waiting for data during a seek.
+    stream_abort: Option<StreamAbortHandle>,
 }
 
 impl AudioPlayer {
@@ -75,16 +82,20 @@ impl AudioPlayer {
             stop_signal: Arc::new(AtomicBool::new(false)),
             total_duration: Arc::new(Mutex::new(0.0)),
             seek_target_ms: Arc::new(AtomicU64::new(NO_SEEK)),
+            pre_seek_samples: Arc::new(AtomicU64::new(0)),
+            stream_abort: None,
         })
     }
 
     pub fn play_stream(
         &mut self,
         source: HttpStreamSource,
+        abort_handle: StreamAbortHandle,
         codec_hint: Option<&str>,
         duration: f64,
     ) -> AppResult<()> {
         self.stop_internal();
+        self.stream_abort = Some(abort_handle);
 
         let mut decoder = AudioDecoder::new(source, codec_hint)?;
         let sr = decoder.sample_rate();
@@ -164,6 +175,7 @@ impl AudioPlayer {
         let stop_signal = Arc::new(AtomicBool::new(false));
         self.stop_signal = Arc::clone(&stop_signal);
         let seek_target = Arc::clone(&self.seek_target_ms);
+        let pre_seek = Arc::clone(&self.pre_seek_samples);
         let samples_played_decode = Arc::clone(&self.samples_played);
         let sr_decode = sr;
         let ch_decode = ch;
@@ -182,23 +194,30 @@ impl AudioPlayer {
                     let seek_seconds = pending_seek as f64 / 1000.0;
                     log::info!("Decode thread: seeking to {:.2}s", seek_seconds);
 
-                    // Clear the ring buffer
-                    {
-                        let (lock, cvar) = &*ring_clone;
-                        let mut ring = lock.lock().unwrap();
-                        ring.buffer.clear();
-                        cvar.notify_all();
+                    // Seek the decoder first; only clear buffer if it succeeds
+                    match decoder.seek(seek_seconds) {
+                        Ok(()) => {
+                            // Clear the ring buffer so stale audio is discarded
+                            {
+                                let (lock, cvar) = &*ring_clone;
+                                let mut ring = lock.lock().unwrap();
+                                ring.buffer.clear();
+                                cvar.notify_all();
+                            }
+                            // Update samples_played to reflect new position
+                            let new_samples =
+                                (seek_seconds * sr_decode as f64 * ch_decode as f64) as u64;
+                            samples_played_decode.store(new_samples, Ordering::SeqCst);
+                        }
+                        Err(e) => {
+                            log::error!("Decode thread: seek failed: {}", e);
+                            // Restore samples_played to the pre-seek value so the
+                            // UI position snaps back to where playback actually is.
+                            let old = pre_seek.load(Ordering::SeqCst);
+                            samples_played_decode.store(old, Ordering::SeqCst);
+                            log::info!("Decode thread: restored position after failed seek");
+                        }
                     }
-
-                    // Seek the decoder
-                    if let Err(e) = decoder.seek(seek_seconds) {
-                        log::error!("Decode thread: seek failed: {}", e);
-                        // Update position counter anyway so UI reflects the attempt
-                    }
-
-                    // Update samples_played to reflect new position
-                    let new_samples = (seek_seconds * sr_decode as f64 * ch_decode as f64) as u64;
-                    samples_played_decode.store(new_samples, Ordering::SeqCst);
                     continue;
                 }
 
@@ -230,16 +249,17 @@ impl AudioPlayer {
                         cvar.notify_all();
                     }
                     Ok(None) => {
+                        log::info!("[decode] EOF reached, setting finished=true");
                         let (lock, cvar) = &*ring_clone;
                         let mut ring = lock.lock().unwrap();
+                        let buf_len = ring.buffer.len();
                         ring.finished = true;
                         cvar.notify_all();
+                        log::info!("[decode] Ring buffer has {} samples remaining", buf_len);
                         break;
                     }
                     Err(e) => {
-                        log::error!("Decode error: {}", e);
-                        // Treat decode errors as end-of-stream so is_finished()
-                        // returns true and auto-advance can trigger.
+                        log::error!("[decode] Decode error: {}", e);
                         let (lock, cvar) = &*ring_clone;
                         let mut ring = lock.lock().unwrap();
                         ring.finished = true;
@@ -257,6 +277,12 @@ impl AudioPlayer {
     fn stop_internal(&mut self) {
         self.stop_signal.store(true, Ordering::SeqCst);
         self.playing.store(false, Ordering::SeqCst);
+
+        // Abort the stream source so the decode thread unblocks if it's
+        // waiting for data (e.g. after seeking past the download cursor).
+        if let Some(abort) = self.stream_abort.take() {
+            abort.abort();
+        }
 
         {
             let (_lock, cvar) = &*self.ring;
@@ -312,6 +338,10 @@ impl AudioPlayer {
     }
 
     pub fn seek(&self, position_seconds: f64) {
+        // Save current position so the decode thread can restore it if seek fails
+        let old_samples = self.samples_played.load(Ordering::SeqCst);
+        self.pre_seek_samples.store(old_samples, Ordering::SeqCst);
+
         // Send seek request to the decode thread (in milliseconds for precision)
         let ms = (position_seconds * 1000.0) as u64;
         self.seek_target_ms.store(ms, Ordering::SeqCst);
@@ -372,6 +402,17 @@ impl AudioPlayer {
                         );
                         writer.set_error(format!("Download failed: HTTP {}", status));
                         return;
+                    }
+
+                    // Tell the stream source the total length so symphonia
+                    // treats it as seekable before the download finishes.
+                    if let Some(len) = response
+                        .headers()
+                        .get("content-length")
+                        .and_then(|v| v.to_str().ok())
+                        .and_then(|v| v.parse::<u64>().ok())
+                    {
+                        writer.set_total_length(len);
                     }
 
                     use futures_util::StreamExt;

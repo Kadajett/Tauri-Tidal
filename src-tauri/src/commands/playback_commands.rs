@@ -299,7 +299,7 @@ async fn play_track_internal(
         playback_codec = preloaded.codec_hint.clone();
         let codec_hint = preloaded.codec_hint.as_deref();
         let mut player = state.audio_player.write().await;
-        player.play_stream(preloaded.source, codec_hint, preloaded.duration)?;
+        player.play_stream(preloaded.source, preloaded.abort_handle, codec_hint, preloaded.duration)?;
     } else {
         // Fetch manifest (contains both URI and codec) and play
         log::info!(
@@ -315,7 +315,7 @@ async fn play_track_internal(
 
         playback_codec = Some(manifest.codec.clone());
 
-        let (source, writer) = HttpStreamSource::new();
+        let (source, writer, abort_handle) = HttpStreamSource::new();
         let client = state.tidal_client.http_client().clone();
 
         // Start the download on a background task
@@ -334,7 +334,7 @@ async fn play_track_internal(
             // Use tokio's Handle to enter the async context for the lock.
             let rt = tokio::runtime::Handle::current();
             let mut player = rt.block_on(player_ref.write());
-            player.play_stream(source, Some(&codec), duration)
+            player.play_stream(source, abort_handle, Some(&codec), duration)
         })
         .await
         .map_err(|e| AppError::Audio(format!("spawn_blocking join error: {}", e)))?;
