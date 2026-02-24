@@ -1,6 +1,6 @@
 use crate::api::client::TidalClient;
 use crate::api::models::{Playlist, Track};
-use crate::api::search::{get_first_relationship_id, parse_playlist, parse_track};
+use crate::api::search::{get_first_relationship_id, parse_playlist, parse_tracks_from_included};
 use crate::error::{AppError, AppResult};
 use std::collections::HashMap;
 
@@ -233,100 +233,7 @@ impl TidalClient {
         let body: serde_json::Value = response.json().await?;
         let included = body.get("included").and_then(|v| v.as_array());
 
-        // Build lookup maps from included resources
-        let mut artist_map: HashMap<String, String> = HashMap::new();
-        let mut album_map: HashMap<String, (String, Option<String>)> = HashMap::new();
-        let mut artwork_map: HashMap<String, String> = HashMap::new();
-
-        if let Some(items) = included {
-            // First pass: extract artworks
-            for item in items {
-                if item.get("type").and_then(|v| v.as_str()) == Some("artworks") {
-                    let id = item
-                        .get("id")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_string();
-                    if let Some(href) = item
-                        .get("attributes")
-                        .and_then(|a| a.get("files"))
-                        .and_then(|v| v.as_array())
-                        .and_then(|arr| arr.last().or(arr.first()))
-                        .and_then(|f| f.get("href"))
-                        .and_then(|v| v.as_str())
-                    {
-                        artwork_map.insert(id, href.to_string());
-                    }
-                }
-            }
-            // Second pass: extract artists and albums
-            for item in items {
-                let rtype = item.get("type").and_then(|v| v.as_str()).unwrap_or("");
-                let rid = item
-                    .get("id")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                match rtype {
-                    "artists" => {
-                        if let Some(name) = item
-                            .get("attributes")
-                            .and_then(|a| a.get("name"))
-                            .and_then(|v| v.as_str())
-                        {
-                            artist_map.insert(rid, name.to_string());
-                        }
-                    }
-                    "albums" => {
-                        if let Some(title) = item
-                            .get("attributes")
-                            .and_then(|a| a.get("title"))
-                            .and_then(|v| v.as_str())
-                        {
-                            let artwork =
-                                get_first_relationship_id(item.get("relationships"), "coverArt")
-                                    .and_then(|art_id| artwork_map.get(&art_id).cloned());
-                            album_map.insert(rid, (title.to_string(), artwork));
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
-
-        let mut tracks = Vec::new();
-        if let Some(items) = included {
-            for item in items {
-                let resource_type = item.get("type").and_then(|v| v.as_str()).unwrap_or("");
-                if resource_type == "tracks" {
-                    let id = item.get("id").and_then(|v| v.as_str()).unwrap_or("");
-                    let attrs = item.get("attributes").cloned().unwrap_or_default();
-                    let rels = item.get("relationships");
-                    if let Some(mut track) = parse_track(id, &attrs) {
-                        // Resolve artist from relationships
-                        if let Some(artist_id) = get_first_relationship_id(rels, "artists") {
-                            if let Some(name) = artist_map.get(&artist_id) {
-                                track.artist_name = name.clone();
-                                track.artist_id = Some(artist_id);
-                            }
-                        }
-                        // Resolve album from relationships
-                        if let Some(album_id) = get_first_relationship_id(rels, "albums") {
-                            if let Some((title, artwork)) = album_map.get(&album_id) {
-                                track.album_name = title.clone();
-                                track.album_id = Some(album_id);
-                                if track.artwork_url.is_none() {
-                                    track.artwork_url = artwork.clone();
-                                }
-                            }
-                        }
-                        tracks.push(track);
-                    }
-                }
-            }
-        }
-
-        Ok(tracks)
+        Ok(parse_tracks_from_included(included))
     }
 
     pub async fn create_playlist(

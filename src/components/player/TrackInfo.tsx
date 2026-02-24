@@ -19,7 +19,6 @@ function ArtworkImage({ src, alt }: { src: string; alt: string }) {
       alt={alt}
       className="size-12 rounded-xs object-cover"
       referrerPolicy="no-referrer"
-      crossOrigin="anonymous"
       onError={() => setFailed(true)}
     />
   );

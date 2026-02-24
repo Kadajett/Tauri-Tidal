@@ -238,6 +238,12 @@ impl AudioPlayer {
                     }
                     Err(e) => {
                         log::error!("Decode error: {}", e);
+                        // Treat decode errors as end-of-stream so is_finished()
+                        // returns true and auto-advance can trigger.
+                        let (lock, cvar) = &*ring_clone;
+                        let mut ring = lock.lock().unwrap();
+                        ring.finished = true;
+                        cvar.notify_all();
                         break;
                     }
                 }

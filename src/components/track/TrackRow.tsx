@@ -48,7 +48,6 @@ export function TrackRow({ track, index, onPlay, onContextMenu, showArtwork }: T
               alt={track.albumName}
               className="size-10 rounded-xs object-cover"
               referrerPolicy="no-referrer"
-              crossOrigin="anonymous"
             />
           ) : (
             <div className="size-10 rounded-xs bg-muted" />

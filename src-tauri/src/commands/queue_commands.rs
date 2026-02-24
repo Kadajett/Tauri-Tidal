@@ -8,12 +8,17 @@ use crate::AppState;
 #[tauri::command]
 pub async fn get_queue(state: State<'_, AppState>) -> Result<QueueState, AppError> {
     let queue = state.playback_queue.read().await;
-    Ok(queue.state())
+    let mut qs = queue.state();
+    for track in &mut qs.tracks {
+        track.resolve_artwork();
+    }
+    Ok(qs)
 }
 
 #[tauri::command]
 pub async fn add_to_queue(state: State<'_, AppState>, track_id: String) -> Result<(), AppError> {
-    let track = state.tidal_client.get_track(&track_id).await?;
+    let mut track = state.tidal_client.get_track(&track_id).await?;
+    track.resolve_artwork();
     let mut queue = state.playback_queue.write().await;
     queue.add_track(track);
     Ok(())
@@ -111,11 +116,16 @@ pub async fn load_saved_queue() -> Result<QueueState, AppError> {
     let content = std::fs::read_to_string(&path)?;
     let persisted: PersistedQueueState = serde_json::from_str(&content)?;
 
+    let mut tracks = persisted.tracks;
+    for track in &mut tracks {
+        track.resolve_artwork();
+    }
+
     // Return the persisted state for the frontend to restore the current track display,
     // but do NOT load it into the backend queue. The queue starts empty on each launch
     // so the queue page only shows tracks from the current session.
     Ok(QueueState {
-        tracks: persisted.tracks,
+        tracks,
         current_index: persisted.current_index,
         repeat_mode: persisted.repeat_mode,
         shuffled: persisted.shuffled,

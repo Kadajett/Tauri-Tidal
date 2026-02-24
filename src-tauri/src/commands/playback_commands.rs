@@ -35,7 +35,7 @@ pub async fn play_track(
 pub async fn play_tracks(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
-    tracks: Vec<crate::api::models::Track>,
+    mut tracks: Vec<crate::api::models::Track>,
     start_index: usize,
 ) -> Result<(), AppError> {
     log::info!(
@@ -46,6 +46,10 @@ pub async fn play_tracks(
     {
         let mut pl = state.preloaded_track.lock().await;
         *pl = None;
+    }
+
+    for track in &mut tracks {
+        track.resolve_artwork();
     }
 
     let mut queue = state.playback_queue.write().await;

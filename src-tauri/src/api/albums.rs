@@ -1,8 +1,7 @@
 use crate::api::client::TidalClient;
 use crate::api::models::{Album, Track};
-use crate::api::search::{get_first_relationship_id, parse_album, parse_track};
+use crate::api::search::{get_first_relationship_id, parse_album, parse_tracks_from_included};
 use crate::error::{AppError, AppResult};
-use std::collections::HashMap;
 
 impl TidalClient {
     pub async fn get_album(&self, album_id: &str) -> AppResult<Album> {
@@ -91,52 +90,19 @@ impl TidalClient {
         let response = self
             .get_with_query(
                 &path,
-                &[("countryCode", country.as_str()), ("include", "items")],
+                &[
+                    ("countryCode", country.as_str()),
+                    (
+                        "include",
+                        "items,items.artists,items.albums,items.albums.coverArt",
+                    ),
+                ],
             )
             .await?;
 
         let body: serde_json::Value = response.json().await?;
         let included = body.get("included").and_then(|v| v.as_array());
 
-        // Build artist map from included resources
-        let mut artist_map: HashMap<String, String> = HashMap::new();
-        if let Some(items) = included {
-            for item in items {
-                if item.get("type").and_then(|v| v.as_str()) == Some("artists") {
-                    let id = item.get("id").and_then(|v| v.as_str()).unwrap_or("");
-                    if let Some(name) = item
-                        .get("attributes")
-                        .and_then(|a| a.get("name"))
-                        .and_then(|v| v.as_str())
-                    {
-                        artist_map.insert(id.to_string(), name.to_string());
-                    }
-                }
-            }
-        }
-
-        let mut tracks = Vec::new();
-        if let Some(items) = included {
-            for item in items {
-                let resource_type = item.get("type").and_then(|v| v.as_str()).unwrap_or("");
-                if resource_type == "tracks" {
-                    let id = item.get("id").and_then(|v| v.as_str()).unwrap_or("");
-                    let attrs = item.get("attributes").cloned().unwrap_or_default();
-                    let rels = item.get("relationships");
-                    if let Some(mut track) = parse_track(id, &attrs) {
-                        // Resolve artist from relationships
-                        if let Some(artist_id) = get_first_relationship_id(rels, "artists") {
-                            if let Some(name) = artist_map.get(&artist_id) {
-                                track.artist_name = name.clone();
-                                track.artist_id = Some(artist_id);
-                            }
-                        }
-                        tracks.push(track);
-                    }
-                }
-            }
-        }
-
-        Ok(tracks)
+        Ok(parse_tracks_from_included(included))
     }
 }

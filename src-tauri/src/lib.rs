@@ -696,16 +696,29 @@ pub fn run() {
                                 preloaded.filter(|p| p.track_id == next_track.id)
                             {
                                 log::info!("Using preloaded track for gapless playback");
-                                let codec_hint = preloaded.codec_hint.as_deref();
-                                let mut player = player_for_progress.write().await;
-                                match player.play_stream(
-                                    preloaded.source,
-                                    codec_hint,
-                                    preloaded.duration,
-                                ) {
-                                    Ok(()) => {}
-                                    Err(e) => {
+                                // Use spawn_blocking so the blocking format-probe
+                                // inside play_stream doesn't stall the Tokio runtime.
+                                let player_ref = Arc::clone(&player_for_progress);
+                                let result = tokio::task::spawn_blocking(move || {
+                                    let rt = tokio::runtime::Handle::current();
+                                    let mut player = rt.block_on(player_ref.write());
+                                    let codec_hint = preloaded.codec_hint.as_deref();
+                                    player.play_stream(
+                                        preloaded.source,
+                                        codec_hint,
+                                        preloaded.duration,
+                                    )
+                                })
+                                .await;
+                                match result {
+                                    Ok(Ok(())) => {}
+                                    Ok(Err(e)) => {
                                         log::error!("Failed to play preloaded track: {}", e);
+                                        advancing = false;
+                                        continue;
+                                    }
+                                    Err(e) => {
+                                        log::error!("spawn_blocking join error: {}", e);
                                         advancing = false;
                                         continue;
                                     }
@@ -722,15 +735,34 @@ pub fn run() {
                                             manifest.uri,
                                             client.http_client().clone(),
                                         );
-                                        let mut player = player_for_progress.write().await;
-                                        if let Err(e) = player.play_stream(
-                                            source,
-                                            Some(&manifest.codec),
-                                            next_track.duration,
-                                        ) {
-                                            log::error!("Failed to play next track: {}", e);
-                                            advancing = false;
-                                            continue;
+                                        // Use spawn_blocking so the blocking format-probe
+                                        // inside play_stream doesn't stall the Tokio runtime
+                                        // and deadlock with the download task.
+                                        let player_ref = Arc::clone(&player_for_progress);
+                                        let codec = manifest.codec.clone();
+                                        let duration = next_track.duration;
+                                        let result = tokio::task::spawn_blocking(move || {
+                                            let rt = tokio::runtime::Handle::current();
+                                            let mut player = rt.block_on(player_ref.write());
+                                            player.play_stream(
+                                                source,
+                                                Some(&codec),
+                                                duration,
+                                            )
+                                        })
+                                        .await;
+                                        match result {
+                                            Ok(Ok(())) => {}
+                                            Ok(Err(e)) => {
+                                                log::error!("Failed to play next track: {}", e);
+                                                advancing = false;
+                                                continue;
+                                            }
+                                            Err(e) => {
+                                                log::error!("spawn_blocking join error: {}", e);
+                                                advancing = false;
+                                                continue;
+                                            }
                                         }
                                     }
                                     Err(e) => {
