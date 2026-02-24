@@ -5,9 +5,46 @@ import { TrackList } from "@/components/track/TrackList";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useSearchStore } from "@/stores/searchStore";
 import { usePlayback } from "@/hooks/usePlayback";
+import { invoke } from "@tauri-apps/api/core";
 import * as tauri from "@/lib/tauri";
 import type { RecommendationSection } from "@/types/track";
 import type { Track } from "@/types/track";
+
+const headerImageCache = new Map<string, string>();
+
+function useProxiedUrl(src: string | undefined): string | null {
+  const [dataUri, setDataUri] = useState<string | null>(
+    () => (src && headerImageCache.get(src)) ?? null,
+  );
+
+  useEffect(() => {
+    if (!src) return;
+
+    const cached = headerImageCache.get(src);
+    if (cached) {
+      setDataUri(cached);
+      return;
+    }
+
+    setDataUri(null);
+    let cancelled = false;
+
+    invoke<string>("proxy_image", { url: src })
+      .then((uri) => {
+        if (!cancelled) {
+          headerImageCache.set(src, uri);
+          setDataUri(uri);
+        }
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
+  }, [src]);
+
+  return dataUri;
+}
 
 function SectionSkeleton() {
   return (
@@ -31,6 +68,13 @@ function RecommendationSectionView({ section }: RecommendationSectionViewProps) 
 
   const displayTracks = expanded ? section.tracks : section.tracks.slice(0, 5);
 
+  // Get the first track's artwork at the largest CDN size for the header
+  const headerArtworkUrl = section.tracks[0]?.artworkUrl?.replace(
+    /\/\d+x\d+\.jpg$/,
+    "/1280x1280.jpg",
+  );
+  const headerDataUri = useProxiedUrl(headerArtworkUrl);
+
   const handlePlay = useCallback(
     (track: Track) => {
       const idx = section.tracks.findIndex((t) => t.id === track.id);
@@ -46,8 +90,18 @@ function RecommendationSectionView({ section }: RecommendationSectionViewProps) 
   }, [section.tracks, playTracks]);
 
   return (
-    <div className="flex flex-col gap-2">
-      <div className="flex items-center justify-between">
+    <div className="relative flex flex-col gap-2 overflow-hidden rounded-sm">
+      {headerDataUri && (
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-20 overflow-hidden">
+          <img
+            src={headerDataUri}
+            alt=""
+            className="h-full w-full object-cover object-center"
+          />
+          <div className="absolute inset-0 bg-linear-to-b from-background/40 to-background" />
+        </div>
+      )}
+      <div className="relative z-10 flex items-center justify-between pt-5 px-3">
         <div>
           <h3 className="text-lg/7 font-semibold">{section.title}</h3>
           {section.subtitle && (
@@ -63,10 +117,12 @@ function RecommendationSectionView({ section }: RecommendationSectionViewProps) 
           </button>
         )}
       </div>
-      <TrackList tracks={displayTracks} onPlay={handlePlay} />
+      <div className="relative z-10">
+        <TrackList tracks={displayTracks} onPlay={handlePlay} />
+      </div>
       {section.tracks.length > 5 && (
         <button
-          className="self-start px-3 py-1 text-sm/5 text-muted-foreground hover:text-foreground"
+          className="relative z-10 self-start px-3 py-1 text-sm/5 text-muted-foreground hover:text-foreground"
           onClick={() => setExpanded((prev) => !prev)}
         >
           {expanded ? "Show less" : `Show all ${section.tracks.length} tracks`}
