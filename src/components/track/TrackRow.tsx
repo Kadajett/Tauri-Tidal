@@ -55,10 +55,10 @@ export function TrackRow({ track, index, onPlay, onContextMenu, showArtwork }: T
           )}
         </div>
       )}
-      <div className="min-w-0">
+      <div className="min-w-0 overflow-hidden">
         <button
           className={cn(
-            "truncate text-sm/5 text-left hover:underline hover:text-foreground",
+            "block max-w-full truncate text-sm/5 text-left hover:underline hover:text-foreground",
             isActive && "text-primary font-medium",
           )}
           onClick={(e) => {
@@ -84,10 +84,10 @@ export function TrackRow({ track, index, onPlay, onContextMenu, showArtwork }: T
           )}
         </p>
       </div>
-      <div className="min-w-0">
+      <div className="min-w-0 overflow-hidden">
         {track.albumId ? (
           <button
-            className="truncate text-sm/5 text-muted-foreground text-left hover:underline hover:text-foreground"
+            className="block max-w-full truncate text-sm/5 text-muted-foreground text-left hover:underline hover:text-foreground"
             onClick={(e) => {
               e.stopPropagation();
               navigate(`/album/${track.albumId}`);

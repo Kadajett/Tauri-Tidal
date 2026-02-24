@@ -12,6 +12,7 @@ interface PlayerState {
   previousVolume: number;
   codec: string | null;
   quality: string | null;
+  expanded: boolean;
 
   setState: (state: PlaybackState) => void;
   setCurrentTrack: (track: Track | null) => void;
@@ -21,6 +22,7 @@ interface PlayerState {
   setVolume: (volume: number) => void;
   toggleMute: () => void;
   setProgress: (position: number, duration: number) => void;
+  setExpanded: (expanded: boolean) => void;
 }
 
 export const usePlayerStore = create<PlayerState>((set, get) => ({
@@ -33,6 +35,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   previousVolume: 1.0,
   codec: null,
   quality: null,
+  expanded: false,
 
   setState: (state) => set({ state }),
   setCurrentTrack: (track) => set({ currentTrack: track }),
@@ -49,4 +52,5 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     }
   },
   setProgress: (position, duration) => set({ position, duration }),
+  setExpanded: (expanded) => set({ expanded }),
 }));

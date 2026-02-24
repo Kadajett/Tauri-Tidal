@@ -2,6 +2,7 @@ import { Outlet } from "react-router";
 import { useCallback, useEffect, useRef } from "react";
 import { Sidebar } from "./Sidebar";
 import { FooterPlayer } from "@/components/player/FooterPlayer";
+import { FullPagePlayer } from "@/components/player/FullPagePlayer";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { usePlayerStore } from "@/stores/playerStore";
 import { useQueueStore } from "@/stores/queueStore";
@@ -201,6 +202,7 @@ export function AppLayout() {
         </main>
       </div>
       <FooterPlayer />
+      <FullPagePlayer />
     </div>
   );
 }

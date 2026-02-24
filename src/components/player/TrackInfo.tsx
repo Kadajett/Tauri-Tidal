@@ -9,6 +9,7 @@ import { useLibrary } from "@/hooks/useLibrary";
 export function TrackInfo() {
   const currentTrack = usePlayerStore((s) => s.currentTrack);
   const quality = usePlayerStore((s) => s.quality);
+  const setExpanded = usePlayerStore((s) => s.setExpanded);
   const isFavorite = useLibraryStore((s) => s.isFavorite);
   const { toggleFavorite } = useLibrary();
   const navigate = useNavigate();
@@ -32,16 +33,12 @@ export function TrackInfo() {
 
   return (
     <div className="flex items-center gap-3 overflow-hidden">
-      {currentTrack.albumId ? (
-        <button
-          className="shrink-0"
-          onClick={() => navigate(`/album/${currentTrack.albumId}`)}
-        >
-          {artwork}
-        </button>
-      ) : (
-        artwork
-      )}
+      <button
+        className="shrink-0"
+        onClick={() => setExpanded(true)}
+      >
+        {artwork}
+      </button>
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm/5 font-medium">{currentTrack.title}</p>
         <p className="flex items-center gap-1.5 truncate text-xs/4 text-muted-foreground">
