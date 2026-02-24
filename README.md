@@ -4,6 +4,9 @@ A native macOS desktop player for Tidal, built with Tauri v2, React, and Rust.
 
 MacTidal connects directly to the Tidal API to stream lossless audio through a native Rust audio pipeline. It integrates with macOS media keys and Now Playing, runs as a lightweight native app (not Electron), and gives you full control over your library, playlists, and queue.
 
+<img width="1187" height="793" alt="Screenshot 2026-02-24 at 8 35 08 AM" src="https://github.com/user-attachments/assets/5db57d19-c398-4455-a6e3-a45218a91e4b" />
+
+
 ## Architecture
 
 ```
