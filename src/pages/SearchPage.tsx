@@ -39,12 +39,28 @@ function RecommendationSectionView({ section }: RecommendationSectionViewProps) 
     [section.tracks, playTracks],
   );
 
+  const handlePlayMix = useCallback(() => {
+    if (section.tracks.length > 0) {
+      playTracks(section.tracks, 0);
+    }
+  }, [section.tracks, playTracks]);
+
   return (
     <div className="flex flex-col gap-2">
-      <div>
-        <h3 className="text-lg/7 font-semibold">{section.title}</h3>
-        {section.subtitle && (
-          <p className="text-sm/5 text-muted-foreground">{section.subtitle}</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-lg/7 font-semibold">{section.title}</h3>
+          {section.subtitle && (
+            <p className="text-sm/5 text-muted-foreground">{section.subtitle}</p>
+          )}
+        </div>
+        {section.tracks.length > 0 && (
+          <button
+            className="rounded-sm bg-primary px-4 py-1.5 text-sm/5 font-medium text-primary-foreground hover:bg-primary/90"
+            onClick={handlePlayMix}
+          >
+            Play Mix
+          </button>
         )}
       </div>
       <TrackList tracks={displayTracks} onPlay={handlePlay} />

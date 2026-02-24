@@ -28,15 +28,21 @@ export function ProgressBar() {
   const handleValueCommit = useCallback(
     (value: number[]) => {
       const newPos = (value[0] / 100) * duration;
+      // Set display position to the seek target BEFORE clearing drag,
+      // so the animation re-syncs from here instead of snapping back
+      setDisplayPosition(newPos);
       seek(newPos);
       setDragValue(null);
       isDragging.current = false;
       setDragging(false);
     },
-    [duration, seek, setDragging],
+    [duration, seek, setDragging, setDisplayPosition],
   );
 
   const currentPos = dragValue ?? displayPosition;
+  const sliderValue = dragValue != null && duration > 0
+    ? (dragValue / duration) * 100
+    : fraction * 100;
 
   return (
     <div className="flex items-center gap-2">
@@ -44,7 +50,7 @@ export function ProgressBar() {
         {formatTime(currentPos)}
       </span>
       <Slider
-        value={[fraction * 100]}
+        value={[sliderValue]}
         max={100}
         step={0.1}
         onValueChange={handleValueChange}

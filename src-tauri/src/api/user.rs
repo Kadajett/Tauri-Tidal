@@ -377,22 +377,45 @@ impl TidalClient {
                 if id.is_empty() {
                     continue;
                 }
-                let title = item
-                    .get("attributes")
+                let attrs = item.get("attributes");
+                let res_type = item
+                    .get("type")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown");
+
+                // Try "title" first, then "name" as fallback (API may use either)
+                let title = attrs
                     .and_then(|a| a.get("title"))
                     .and_then(|v| v.as_str())
+                    .or_else(|| attrs.and_then(|a| a.get("name")).and_then(|v| v.as_str()))
                     .unwrap_or("")
                     .to_string();
-                let subtitle = item
-                    .get("attributes")
+                let subtitle = attrs
                     .and_then(|a| a.get("subTitle"))
+                    .or_else(|| attrs.and_then(|a| a.get("subtitle")))
+                    .or_else(|| attrs.and_then(|a| a.get("description")))
                     .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty())
                     .map(String::from);
+
+                log::trace!(
+                    "[fetch_recommendation_mixes] included: type={}, id={}, title={:?}, attrs_keys={:?}",
+                    res_type,
+                    id,
+                    title,
+                    attrs.and_then(|a| a.as_object()).map(|o| o.keys().collect::<Vec<_>>())
+                );
+
                 if !title.is_empty() {
                     mix_info.insert(id.to_string(), (title, subtitle));
                 }
             }
         }
+
+        log::info!(
+            "[fetch_recommendation_mixes] mix_info has {} entries",
+            mix_info.len()
+        );
 
         // Collect mix IDs from relationships, preserving category order
         let mut mix_ids: Vec<String> = Vec::new();
@@ -406,6 +429,13 @@ impl TidalClient {
                 {
                     for r in refs {
                         if let Some(id) = r.get("id").and_then(|v| v.as_str()) {
+                            let found = mix_info.contains_key(id);
+                            log::trace!(
+                                "[fetch_recommendation_mixes] rel={}, id={}, in_mix_info={}",
+                                rel_key,
+                                id,
+                                found
+                            );
                             if !mix_ids.contains(&id.to_string()) {
                                 mix_ids.push(id.to_string());
                             }
@@ -418,6 +448,12 @@ impl TidalClient {
         if mix_ids.is_empty() {
             mix_ids = mix_info.keys().cloned().collect();
         }
+
+        log::info!(
+            "[fetch_recommendation_mixes] {} mix IDs collected, {} in mix_info",
+            mix_ids.len(),
+            mix_info.len()
+        );
 
         if mix_ids.is_empty() {
             return Vec::new();

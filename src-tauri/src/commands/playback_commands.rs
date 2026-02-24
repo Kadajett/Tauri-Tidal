@@ -21,7 +21,8 @@ pub async fn play_track(
     track_id: String,
 ) -> Result<(), AppError> {
     log::info!("[play_track] track_id={}", track_id);
-    let track = state.tidal_client.get_track(&track_id).await?;
+    let mut track = state.tidal_client.get_track(&track_id).await?;
+    track.resolve_artwork();
     {
         let mut pl = state.preloaded_track.lock().await;
         *pl = None;
@@ -78,6 +79,7 @@ pub async fn pause(state: State<'_, AppState>, app: tauri::AppHandle) -> Result<
         },
     );
 
+    #[cfg(target_os = "macos")]
     if let Some(track) = state.current_track.read().await.as_ref() {
         let position = player.position_seconds();
         crate::macos::now_playing::update_now_playing(
@@ -105,6 +107,7 @@ pub async fn resume(state: State<'_, AppState>, app: tauri::AppHandle) -> Result
         },
     );
 
+    #[cfg(target_os = "macos")]
     if let Some(track) = state.current_track.read().await.as_ref() {
         let position = player.position_seconds();
         crate::macos::now_playing::update_now_playing(
@@ -134,6 +137,7 @@ pub async fn stop(state: State<'_, AppState>, app: tauri::AppHandle) -> Result<(
         },
     );
 
+    #[cfg(target_os = "macos")]
     crate::macos::now_playing::clear_now_playing();
 
     Ok(())
@@ -210,6 +214,7 @@ pub async fn next_track(state: State<'_, AppState>, app: tauri::AppHandle) -> Re
                     state: PlaybackState::Stopped,
                 },
             );
+            #[cfg(target_os = "macos")]
             crate::macos::now_playing::clear_now_playing();
             Ok(())
         }
@@ -335,14 +340,17 @@ async fn play_track_internal(
     }
 
     // Derive a human-friendly quality label from the codec
-    let quality_label = playback_codec.as_deref().map(|c| match c.to_lowercase().as_str() {
-        "flac" | "flac_hires" => "FLAC",
-        "aaclc" | "mp4a.40.2" | "mp4a" | "aac" => "AAC",
-        "heaacv1" | "mp4a.40.5" => "AAC",
-        "mp3" => "MP3",
-        "eac3_joc" => "Atmos",
-        other => other,
-    }.to_string());
+    let quality_label = playback_codec.as_deref().map(|c| {
+        match c.to_lowercase().as_str() {
+            "flac" | "flac_hires" => "FLAC",
+            "aaclc" | "mp4a.40.2" | "mp4a" | "aac" => "AAC",
+            "heaacv1" | "mp4a.40.5" => "AAC",
+            "mp3" => "MP3",
+            "eac3_joc" => "Atmos",
+            other => other,
+        }
+        .to_string()
+    });
 
     *state.current_track.write().await = Some(track.clone());
 
@@ -367,6 +375,7 @@ async fn play_track_internal(
         },
     );
 
+    #[cfg(target_os = "macos")]
     crate::macos::now_playing::update_now_playing(
         &track.title,
         &track.artist_name,

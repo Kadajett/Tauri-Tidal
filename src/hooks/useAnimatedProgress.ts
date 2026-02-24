@@ -24,12 +24,17 @@ export function useAnimatedProgress() {
 
   // Animation loop
   useEffect(() => {
-    if (state !== "playing" || draggingRef.current) {
+    if (state !== "playing") {
       cancelAnimationFrame(rafRef.current);
       return;
     }
 
     const tick = () => {
+      if (draggingRef.current) {
+        // Keep scheduling but skip updates while the user is dragging
+        rafRef.current = requestAnimationFrame(tick);
+        return;
+      }
       const now = performance.now();
       const elapsed = (now - lastSyncRef.current.timestamp) / 1000;
       const interpolated = lastSyncRef.current.position + elapsed;
@@ -43,6 +48,13 @@ export function useAnimatedProgress() {
 
   const setDragging = useCallback((isDragging: boolean) => {
     draggingRef.current = isDragging;
+    if (!isDragging) {
+      // Re-sync from latest backend position when drag ends
+      lastSyncRef.current = {
+        position: usePlayerStore.getState().position,
+        timestamp: performance.now(),
+      };
+    }
   }, []);
 
   const fraction = duration > 0 ? displayPosition / duration : 0;
