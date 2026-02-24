@@ -1,9 +1,9 @@
-use base64::engine::general_purpose::STANDARD;
-use base64::Engine;
 use crate::api::client::TidalClient;
 use crate::api::models::Track;
 use crate::api::search::{parse_track, resolve_track_relationships};
 use crate::error::{AppError, AppResult};
+use base64::engine::general_purpose::STANDARD;
+use base64::Engine;
 
 /// v1 API base URL for playback endpoints
 const V1_BASE_URL: &str = "https://api.tidal.com/v1";
@@ -56,7 +56,11 @@ impl TidalClient {
         match self.get_track_manifest_v2(track_id).await {
             Ok(data) => return Ok(data),
             Err(e) => {
-                log::info!("v2 trackManifests failed for {}: {}, trying v1", track_id, e);
+                log::info!(
+                    "v2 trackManifests failed for {}: {}, trying v1",
+                    track_id,
+                    e
+                );
             }
         }
 
@@ -138,8 +142,12 @@ impl TidalClient {
             _ => "HIGH",
         };
 
-        let url = format!("{}/tracks/{}/playbackinfo", V1_BASE_URL, track_id);
-        log::info!("Fetching v1 playback info: {} quality={}", url, audio_quality);
+        let url = format!("{}/tracks/{}/playbackinfopostpaywall", V1_BASE_URL, track_id);
+        log::info!(
+            "Fetching v1 playback info: {} quality={}",
+            url,
+            audio_quality
+        );
 
         let response = self
             .http_client()
@@ -170,9 +178,15 @@ impl TidalClient {
         let body: serde_json::Value = response.json().await?;
         log::info!(
             "v1 playback info: manifestMimeType={}, audioQuality={}, audioMode={}",
-            body.get("manifestMimeType").and_then(|v| v.as_str()).unwrap_or("?"),
-            body.get("audioQuality").and_then(|v| v.as_str()).unwrap_or("?"),
-            body.get("audioMode").and_then(|v| v.as_str()).unwrap_or("?"),
+            body.get("manifestMimeType")
+                .and_then(|v| v.as_str())
+                .unwrap_or("?"),
+            body.get("audioQuality")
+                .and_then(|v| v.as_str())
+                .unwrap_or("?"),
+            body.get("audioMode")
+                .and_then(|v| v.as_str())
+                .unwrap_or("?"),
         );
 
         let manifest_mime = body
@@ -190,7 +204,11 @@ impl TidalClient {
         let manifest_str = String::from_utf8(manifest_bytes)
             .map_err(|e| AppError::Decode(format!("UTF-8 decode failed: {}", e)))?;
 
-        log::info!("v1 manifest decoded: mime={}, content_len={}", manifest_mime, manifest_str.len());
+        log::info!(
+            "v1 manifest decoded: mime={}, content_len={}",
+            manifest_mime,
+            manifest_str.len()
+        );
 
         let audio_quality_str = body
             .get("audioQuality")
@@ -203,8 +221,13 @@ impl TidalClient {
                 "BTS manifest: codecs={}, mimeType={}, encryptionType={}, urls_count={}",
                 bts.get("codecs").and_then(|v| v.as_str()).unwrap_or("?"),
                 bts.get("mimeType").and_then(|v| v.as_str()).unwrap_or("?"),
-                bts.get("encryptionType").and_then(|v| v.as_str()).unwrap_or("NONE"),
-                bts.get("urls").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0),
+                bts.get("encryptionType")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("NONE"),
+                bts.get("urls")
+                    .and_then(|v| v.as_array())
+                    .map(|a| a.len())
+                    .unwrap_or(0),
             );
 
             let encryption = bts
@@ -229,7 +252,11 @@ impl TidalClient {
                 .unwrap_or(audio_quality_str)
                 .to_string();
 
-            log::info!("Using streaming URL: {}... codec={}", &uri[..uri.len().min(80)], codec);
+            log::info!(
+                "Using streaming URL: {}... codec={}",
+                &uri[..uri.len().min(80)],
+                codec
+            );
             Ok(TrackManifestData { uri, codec })
         } else if manifest_mime == "application/vnd.tidal.emu" {
             // EMU manifest: similar to BTS but simpler
@@ -243,17 +270,29 @@ impl TidalClient {
                 .to_string();
 
             let codec = audio_quality_str.to_string();
-            log::info!("EMU streaming URL: {}... codec={}", &uri[..uri.len().min(80)], codec);
+            log::info!(
+                "EMU streaming URL: {}... codec={}",
+                &uri[..uri.len().min(80)],
+                codec
+            );
             Ok(TrackManifestData { uri, codec })
         } else if manifest_mime == "application/dash+xml" {
-            let uri = extract_dash_base_url(&manifest_str)
-                .ok_or_else(|| AppError::Decode("Could not extract URL from DASH manifest".into()))?;
+            let uri = extract_dash_base_url(&manifest_str).ok_or_else(|| {
+                AppError::Decode("Could not extract URL from DASH manifest".into())
+            })?;
             let codec = audio_quality_str.to_string();
-            log::info!("DASH streaming URL: {}... codec={}", &uri[..uri.len().min(80)], codec);
+            log::info!(
+                "DASH streaming URL: {}... codec={}",
+                &uri[..uri.len().min(80)],
+                codec
+            );
             Ok(TrackManifestData { uri, codec })
         } else {
             log::error!("Unsupported manifest type: {}", manifest_mime);
-            log::debug!("Manifest content: {}", &manifest_str[..manifest_str.len().min(500)]);
+            log::debug!(
+                "Manifest content: {}",
+                &manifest_str[..manifest_str.len().min(500)]
+            );
             Err(AppError::Decode(format!(
                 "Unsupported manifest type: {}",
                 manifest_mime
@@ -281,7 +320,9 @@ fn parse_data_url_manifest(data_uri: &str, fallback_codec: &str) -> AppResult<Tr
         if let Some((mime_part, b64_part)) = rest.split_once(";base64,") {
             (mime_part, b64_part)
         } else {
-            return Err(AppError::Decode("Data URL missing ;base64, separator".into()));
+            return Err(AppError::Decode(
+                "Data URL missing ;base64, separator".into(),
+            ));
         }
     } else if data_uri.starts_with("https://") {
         // Direct HTTPS URL, not a data URL: use it directly
@@ -291,7 +332,9 @@ fn parse_data_url_manifest(data_uri: &str, fallback_codec: &str) -> AppResult<Tr
             codec: fallback_codec.to_string(),
         });
     } else {
-        return Err(AppError::Decode("Could not parse data URL from v2 response".into()));
+        return Err(AppError::Decode(
+            "Could not parse data URL from v2 response".into(),
+        ));
     };
 
     let manifest_bytes = STANDARD
@@ -300,7 +343,11 @@ fn parse_data_url_manifest(data_uri: &str, fallback_codec: &str) -> AppResult<Tr
     let manifest_str = String::from_utf8(manifest_bytes)
         .map_err(|e| AppError::Decode(format!("UTF-8 decode of data URL failed: {}", e)))?;
 
-    log::info!("v2 data URL: mime={}, content_len={}", mime, manifest_str.len());
+    log::info!(
+        "v2 data URL: mime={}, content_len={}",
+        mime,
+        manifest_str.len()
+    );
 
     match mime {
         "application/vnd.tidal.bts" => {
@@ -321,18 +368,24 @@ fn parse_data_url_manifest(data_uri: &str, fallback_codec: &str) -> AppResult<Tr
         }
         "application/dash+xml" => {
             // DASH: extract BaseURL from MPD XML
-            let uri = extract_dash_base_url(&manifest_str)
-                .ok_or_else(|| AppError::Decode("Could not extract BaseURL from DASH MPD".into()))?;
+            let uri = extract_dash_base_url(&manifest_str).ok_or_else(|| {
+                AppError::Decode("Could not extract BaseURL from DASH MPD".into())
+            })?;
             // Try to extract codec from DASH Representation
-            let codec = extract_dash_codec(&manifest_str)
-                .unwrap_or_else(|| fallback_codec.to_string());
-            log::info!("v2 DASH: uri={}..., codec={}", &uri[..uri.len().min(80)], codec);
+            let codec =
+                extract_dash_codec(&manifest_str).unwrap_or_else(|| fallback_codec.to_string());
+            log::info!(
+                "v2 DASH: uri={}..., codec={}",
+                &uri[..uri.len().min(80)],
+                codec
+            );
             Ok(TrackManifestData { uri, codec })
         }
         "application/vnd.apple.mpegurl" => {
             // HLS: extract first segment URL
-            let uri = extract_hls_url(&manifest_str)
-                .ok_or_else(|| AppError::Decode("Could not extract URL from HLS manifest".into()))?;
+            let uri = extract_hls_url(&manifest_str).ok_or_else(|| {
+                AppError::Decode("Could not extract URL from HLS manifest".into())
+            })?;
             let codec = fallback_codec.to_string();
             Ok(TrackManifestData { uri, codec })
         }

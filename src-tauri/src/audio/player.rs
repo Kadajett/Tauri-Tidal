@@ -20,6 +20,9 @@ struct SendStream(Option<cpal::Stream>);
 unsafe impl Send for SendStream {}
 unsafe impl Sync for SendStream {}
 
+/// Sentinel value meaning "no seek requested".
+const NO_SEEK: u64 = u64::MAX;
+
 pub struct AudioPlayer {
     /// cpal stream handle (kept alive)
     stream: SendStream,
@@ -41,6 +44,9 @@ pub struct AudioPlayer {
     stop_signal: Arc<AtomicBool>,
     /// Total duration in seconds (from track metadata)
     total_duration: Arc<Mutex<f64>>,
+    /// Seek target in milliseconds (NO_SEEK = no pending seek).
+    /// The decode thread reads and clears this.
+    seek_target_ms: Arc<AtomicU64>,
 }
 
 impl AudioPlayer {
@@ -68,6 +74,7 @@ impl AudioPlayer {
             decode_handle: None,
             stop_signal: Arc::new(AtomicBool::new(false)),
             total_duration: Arc::new(Mutex::new(0.0)),
+            seek_target_ms: Arc::new(AtomicU64::new(NO_SEEK)),
         })
     }
 
@@ -87,6 +94,8 @@ impl AudioPlayer {
         *self.channels.lock().unwrap() = ch;
         *self.total_duration.lock().unwrap() = duration;
         self.samples_played.store(0, Ordering::SeqCst);
+        // Clear any stale seek from a previous track
+        self.seek_target_ms.store(NO_SEEK, Ordering::SeqCst);
 
         {
             let (lock, cvar) = &*self.ring;
@@ -154,6 +163,10 @@ impl AudioPlayer {
         let ring_clone = Arc::clone(&self.ring);
         let stop_signal = Arc::new(AtomicBool::new(false));
         self.stop_signal = Arc::clone(&stop_signal);
+        let seek_target = Arc::clone(&self.seek_target_ms);
+        let samples_played_decode = Arc::clone(&self.samples_played);
+        let sr_decode = sr;
+        let ch_decode = ch;
 
         let handle = std::thread::spawn(move || {
             const MAX_RING_SAMPLES: usize = 176400;
@@ -163,11 +176,38 @@ impl AudioPlayer {
                     break;
                 }
 
+                // Check for pending seek request
+                let pending_seek = seek_target.swap(NO_SEEK, Ordering::SeqCst);
+                if pending_seek != NO_SEEK {
+                    let seek_seconds = pending_seek as f64 / 1000.0;
+                    log::info!("Decode thread: seeking to {:.2}s", seek_seconds);
+
+                    // Clear the ring buffer
+                    {
+                        let (lock, cvar) = &*ring_clone;
+                        let mut ring = lock.lock().unwrap();
+                        ring.buffer.clear();
+                        cvar.notify_all();
+                    }
+
+                    // Seek the decoder
+                    if let Err(e) = decoder.seek(seek_seconds) {
+                        log::error!("Decode thread: seek failed: {}", e);
+                        // Update position counter anyway so UI reflects the attempt
+                    }
+
+                    // Update samples_played to reflect new position
+                    let new_samples = (seek_seconds * sr_decode as f64 * ch_decode as f64) as u64;
+                    samples_played_decode.store(new_samples, Ordering::SeqCst);
+                    continue;
+                }
+
                 {
                     let (lock, cvar) = &*ring_clone;
                     let mut ring = lock.lock().unwrap();
                     while ring.buffer.len() >= MAX_RING_SAMPLES
                         && !stop_signal.load(Ordering::Relaxed)
+                        && seek_target.load(Ordering::Relaxed) == NO_SEEK
                     {
                         ring = cvar.wait(ring).unwrap();
                     }
@@ -175,6 +215,11 @@ impl AudioPlayer {
 
                 if stop_signal.load(Ordering::Relaxed) {
                     break;
+                }
+
+                // Re-check seek after waking from wait
+                if seek_target.load(Ordering::Relaxed) != NO_SEEK {
+                    continue;
                 }
 
                 match decoder.decode_next() {
@@ -260,7 +305,16 @@ impl AudioPlayer {
         *self.total_duration.lock().unwrap()
     }
 
-    pub fn seek(&mut self, position_seconds: f64) {
+    pub fn seek(&self, position_seconds: f64) {
+        // Send seek request to the decode thread (in milliseconds for precision)
+        let ms = (position_seconds * 1000.0) as u64;
+        self.seek_target_ms.store(ms, Ordering::SeqCst);
+
+        // Wake the decode thread if it's waiting on the ring buffer
+        let (_lock, cvar) = &*self.ring;
+        cvar.notify_all();
+
+        // Immediately update the position counter for responsive UI
         let sr = *self.sample_rate.lock().unwrap() as f64;
         let ch = *self.channels.lock().unwrap() as f64;
         let sample_position = (position_seconds * sr * ch) as u64;
@@ -298,12 +352,18 @@ impl AudioPlayer {
 
                     log::info!(
                         "Audio download response: status={}, content-type={}, content-length={}",
-                        status, content_type, content_len
+                        status,
+                        content_type,
+                        content_len
                     );
 
                     if !status.is_success() {
                         let body = response.text().await.unwrap_or_default();
-                        log::error!("Audio download failed ({}): {}", status, &body[..body.len().min(500)]);
+                        log::error!(
+                            "Audio download failed ({}): {}",
+                            status,
+                            &body[..body.len().min(500)]
+                        );
                         writer.set_error(format!("Download failed: HTTP {}", status));
                         return;
                     }
@@ -316,12 +376,19 @@ impl AudioPlayer {
                             Ok(bytes) => {
                                 total_bytes += bytes.len() as u64;
                                 if writer.write_bytes(&bytes).is_err() {
-                                    log::warn!("Audio download: writer closed after {} bytes", total_bytes);
+                                    log::warn!(
+                                        "Audio download: writer closed after {} bytes",
+                                        total_bytes
+                                    );
                                     break;
                                 }
                             }
                             Err(e) => {
-                                log::error!("Audio download stream error after {} bytes: {}", total_bytes, e);
+                                log::error!(
+                                    "Audio download stream error after {} bytes: {}",
+                                    total_bytes,
+                                    e
+                                );
                                 writer.set_error(format!("Download error: {}", e));
                                 return;
                             }

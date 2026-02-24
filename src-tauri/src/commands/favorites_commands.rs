@@ -1,12 +1,15 @@
-use crate::api::models::Track;
+use crate::api::models::FavoritesPage;
 use crate::error::AppError;
 use tauri::State;
 
 use crate::AppState;
 
 #[tauri::command]
-pub async fn get_favorites(state: State<'_, AppState>) -> Result<Vec<Track>, AppError> {
-    state.tidal_client.get_favorites().await
+pub async fn get_favorites(
+    state: State<'_, AppState>,
+    cursor: Option<String>,
+) -> Result<FavoritesPage, AppError> {
+    state.tidal_client.get_favorites(cursor.as_deref()).await
 }
 
 #[tauri::command]

@@ -94,6 +94,101 @@ pub async fn exchange_code(
     Ok(token)
 }
 
+/// Refresh an expired user token using the refresh_token grant.
+pub async fn refresh_user_token(
+    http: &reqwest::Client,
+    client_id: &str,
+    refresh_token: &str,
+) -> AppResult<TokenResponse> {
+    let params = [
+        ("grant_type", "refresh_token"),
+        ("refresh_token", refresh_token),
+        ("client_id", client_id),
+    ];
+
+    let response = http.post(TOKEN_URL).form(&params).send().await?;
+
+    if !response.status().is_success() {
+        let body = response.text().await.unwrap_or_default();
+        return Err(AppError::TidalApi {
+            status: 401,
+            message: format!("Token refresh failed: {}", body),
+        });
+    }
+
+    let token: TokenResponse = response.json().await?;
+    Ok(token)
+}
+
+const DEVICE_AUTH_URL: &str = "https://auth.tidal.com/v1/oauth2/device_authorization";
+
+/// Step 1 of device code flow: request a device code + user code.
+pub async fn request_device_code(
+    http: &reqwest::Client,
+    client_id: &str,
+) -> AppResult<crate::api::models::DeviceAuthResponse> {
+    let params = [
+        ("client_id", client_id),
+        ("scope", "r_usr w_usr"),
+    ];
+
+    let response = http.post(DEVICE_AUTH_URL).form(&params).send().await?;
+
+    if !response.status().is_success() {
+        let body = response.text().await.unwrap_or_default();
+        return Err(AppError::TidalApi {
+            status: 401,
+            message: format!("Device auth request failed: {}", body),
+        });
+    }
+
+    let resp: crate::api::models::DeviceAuthResponse = response.json().await?;
+    Ok(resp)
+}
+
+/// Step 2 of device code flow: poll for the token (call repeatedly with interval).
+/// Returns Ok(Some(token)) when authorized, Ok(None) when still pending.
+pub async fn poll_device_token(
+    http: &reqwest::Client,
+    client_id: &str,
+    device_code: &str,
+) -> AppResult<Option<TokenResponse>> {
+    let params = [
+        ("client_id", client_id),
+        ("device_code", device_code),
+        ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
+        ("scope", "r_usr w_usr"),
+    ];
+
+    let response = http.post(TOKEN_URL).form(&params).send().await?;
+    let status = response.status();
+
+    if status.is_success() {
+        let token: TokenResponse = response.json().await?;
+        return Ok(Some(token));
+    }
+
+    let body = response.text().await.unwrap_or_default();
+
+    // "authorization_pending" means user hasn't approved yet
+    if body.contains("authorization_pending") {
+        return Ok(None);
+    }
+
+    // "expired_token" means the device code expired
+    if body.contains("expired_token") {
+        return Err(AppError::TidalApi {
+            status: status.as_u16(),
+            message: "Device code expired. Please try logging in again.".into(),
+        });
+    }
+
+    Err(AppError::TidalApi {
+        status: status.as_u16(),
+        message: format!("Device token poll failed: {}", body),
+    })
+}
+
 pub async fn client_credentials_token(
     http: &reqwest::Client,
     client_id: &str,

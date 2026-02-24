@@ -3,8 +3,15 @@ import { useLibraryStore } from "@/stores/libraryStore";
 import * as tauri from "@/lib/tauri";
 
 export function useLibrary() {
-  const { setPlaylists, setFavorites, addFavorite, removeFavorite, setLoading } =
-    useLibraryStore();
+  const {
+    setPlaylists,
+    setFavorites,
+    appendFavorites,
+    addFavorite,
+    removeFavorite,
+    setLoading,
+    setLoadingMore,
+  } = useLibraryStore();
 
   const loadPlaylists = useCallback(async () => {
     setLoading(true);
@@ -20,12 +27,26 @@ export function useLibrary() {
 
   const loadFavorites = useCallback(async () => {
     try {
-      const favorites = await tauri.getFavorites();
-      setFavorites(favorites);
+      const page = await tauri.getFavorites();
+      setFavorites(page.tracks, page.nextCursor ?? null, page.hasMore);
     } catch (err) {
       console.error("Failed to load favorites:", err);
     }
   }, [setFavorites]);
+
+  const loadMoreFavorites = useCallback(async () => {
+    const cursor = useLibraryStore.getState().favoritesNextCursor;
+    if (!cursor) return;
+    setLoadingMore(true);
+    try {
+      const page = await tauri.getFavorites(cursor);
+      appendFavorites(page.tracks, page.nextCursor ?? null, page.hasMore);
+    } catch (err) {
+      console.error("Failed to load more favorites:", err);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [appendFavorites, setLoadingMore]);
 
   const toggleFavorite = useCallback(
     async (trackId: string, isFavorited: boolean) => {
@@ -76,6 +97,7 @@ export function useLibrary() {
   return {
     loadPlaylists,
     loadFavorites,
+    loadMoreFavorites,
     toggleFavorite,
     createPlaylist,
     addToPlaylist,

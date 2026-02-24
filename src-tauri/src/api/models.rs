@@ -101,6 +101,22 @@ pub struct Playlist {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct FavoritesPage {
+    pub tracks: Vec<Track>,
+    pub next_cursor: Option<String>,
+    pub has_more: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecommendationSection {
+    pub title: String,
+    pub subtitle: Option<String>,
+    pub tracks: Vec<Track>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SearchResults {
     pub tracks: Vec<Track>,
     pub albums: Vec<Album>,
@@ -126,11 +142,24 @@ pub struct TokenResponse {
     pub user_id: Option<serde_json::Value>,
 }
 
+/// Response from the device authorization endpoint.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceAuthResponse {
+    pub device_code: String,
+    pub user_code: String,
+    pub verification_uri: String,
+    pub verification_uri_complete: Option<String>,
+    pub expires_in: u64,
+    pub interval: u64,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AuthStatus {
     pub authenticated: bool,
     pub user_id: Option<String>,
+    pub display_name: Option<String>,
     pub country_code: String,
 }
 

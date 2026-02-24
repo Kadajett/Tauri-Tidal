@@ -53,7 +53,11 @@ pub async fn play_tracks(
     drop(queue);
 
     if let Some(track) = track {
-        log::info!("[play_tracks] Playing: {} - {}", track.artist_name, track.title);
+        log::info!(
+            "[play_tracks] Playing: {} - {}",
+            track.artist_name,
+            track.title
+        );
         play_track_internal(&state, &app, &track).await?;
         let _ = app.emit(crate::events::PLAYBACK_QUEUE_CHANGED, ());
     } else {
@@ -136,9 +140,31 @@ pub async fn stop(state: State<'_, AppState>, app: tauri::AppHandle) -> Result<(
 }
 
 #[tauri::command]
-pub async fn seek(state: State<'_, AppState>, position: f64) -> Result<(), AppError> {
-    let mut player = state.audio_player.write().await;
+pub async fn seek(
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+    position: f64,
+) -> Result<(), AppError> {
+    let player = state.audio_player.read().await;
     player.seek(position);
+    let duration = player.duration_seconds();
+    drop(player);
+
+    // Emit progress immediately so the UI reflects the seek position
+    let fraction = if duration > 0.0 {
+        position / duration
+    } else {
+        0.0
+    };
+    let _ = app.emit(
+        crate::events::PLAYBACK_PROGRESS,
+        crate::events::ProgressPayload {
+            position,
+            duration,
+            position_fraction: fraction,
+        },
+    );
+
     Ok(())
 }
 
@@ -246,7 +272,9 @@ async fn play_track_internal(
 ) -> Result<(), AppError> {
     log::info!(
         "[play_track_internal] Starting: id={} title={} artist={}",
-        track.id, track.title, track.artist_name
+        track.id,
+        track.title,
+        track.artist_name
     );
 
     // Check for preloaded track first
@@ -255,20 +283,28 @@ async fn play_track_internal(
         pl.take()
     };
 
+    let mut playback_codec: Option<String> = None;
+
     if let Some(preloaded) = preloaded.filter(|p| p.track_id == track.id) {
         log::info!("[play_track_internal] Using preloaded track");
+        playback_codec = preloaded.codec_hint.clone();
         let codec_hint = preloaded.codec_hint.as_deref();
         let mut player = state.audio_player.write().await;
         player.play_stream(preloaded.source, codec_hint, preloaded.duration)?;
     } else {
         // Fetch manifest (contains both URI and codec) and play
-        log::info!("[play_track_internal] Fetching manifest for track {}", track.id);
+        log::info!(
+            "[play_track_internal] Fetching manifest for track {}",
+            track.id
+        );
         let manifest = state.tidal_client.get_track_manifest(&track.id).await?;
         log::info!(
             "[play_track_internal] Got manifest: codec={}, uri={}...",
             manifest.codec,
             &manifest.uri[..manifest.uri.len().min(80)]
         );
+
+        playback_codec = Some(manifest.codec.clone());
 
         let (source, writer) = HttpStreamSource::new();
         let client = state.tidal_client.http_client().clone();
@@ -298,6 +334,16 @@ async fn play_track_internal(
         log::info!("[play_track_internal] play_stream succeeded");
     }
 
+    // Derive a human-friendly quality label from the codec
+    let quality_label = playback_codec.as_deref().map(|c| match c.to_lowercase().as_str() {
+        "flac" | "flac_hires" => "FLAC",
+        "aaclc" | "mp4a.40.2" | "mp4a" | "aac" => "AAC",
+        "heaacv1" | "mp4a.40.5" => "AAC",
+        "mp3" => "MP3",
+        "eac3_joc" => "Atmos",
+        other => other,
+    }.to_string());
+
     *state.current_track.write().await = Some(track.clone());
 
     let _ = app.emit(
@@ -309,6 +355,8 @@ async fn play_track_internal(
             album: track.album_name.clone(),
             duration: track.duration,
             artwork_url: track.artwork_url_sized(480, 480),
+            codec: playback_codec,
+            quality: quality_label,
         },
     );
 

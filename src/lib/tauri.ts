@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { AuthStatus } from "@/types/api";
-import type { Album, Artist, Playlist, Track } from "@/types/track";
+import type { AuthStatus, DeviceAuthResponse } from "@/types/api";
+import type { Album, Artist, FavoritesPage, Playlist, RecommendationSection, Track } from "@/types/track";
 import type { QueueState, RepeatMode } from "@/types/player";
 import type { SearchResults } from "@/types/search";
 import type {
@@ -12,11 +12,13 @@ import type {
 
 // Auth commands
 export const checkAuthStatus = () => invoke<AuthStatus>("check_auth_status");
-export const login = () => invoke<string>("login");
+export const login = () => invoke<DeviceAuthResponse>("login");
+export const pollLogin = () => invoke<AuthStatus>("poll_login");
 export const handleAuthCallback = (code: string) =>
   invoke<AuthStatus>("handle_auth_callback", { code });
 export const initClientCredentials = () =>
   invoke<void>("init_client_credentials");
+export const logout = () => invoke<void>("logout");
 
 // Playback commands
 export const playTrack = (trackId: string) =>
@@ -80,7 +82,8 @@ export const deletePlaylist = (playlistId: string) =>
   invoke<void>("delete_playlist", { playlistId });
 
 // Favorites commands
-export const getFavorites = () => invoke<Track[]>("get_favorites");
+export const getFavorites = (cursor?: string) =>
+  invoke<FavoritesPage>("get_favorites", { cursor });
 export const toggleFavorite = (trackId: string, add: boolean) =>
   invoke<void>("toggle_favorite", { trackId, add });
 
@@ -94,7 +97,7 @@ export const getArtist = (artistId: string) =>
 export const getArtistAlbums = (artistId: string) =>
   invoke<Album[]>("get_artist_albums", { artistId });
 export const getRecommendations = () =>
-  invoke<Track[]>("get_recommendations");
+  invoke<RecommendationSection[]>("get_recommendations");
 export const getSimilarTracks = (trackId: string) =>
   invoke<Track[]>("get_similar_tracks", { trackId });
 

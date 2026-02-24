@@ -85,6 +85,7 @@ export function QueuePage() {
       ) : (
         <TrackList
           tracks={tracks}
+          showArtwork
           onPlay={(track) => {
             const idx = tracks.findIndex((t) => t.id === track.id);
             tauri.playQueueTrack(Math.max(0, idx));

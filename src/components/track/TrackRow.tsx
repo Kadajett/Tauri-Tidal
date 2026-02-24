@@ -9,9 +9,10 @@ interface TrackRowProps {
   index: number;
   onPlay: (track: Track) => void;
   onContextMenu?: (e: React.MouseEvent, track: Track) => void;
+  showArtwork?: boolean;
 }
 
-export function TrackRow({ track, index, onPlay, onContextMenu }: TrackRowProps) {
+export function TrackRow({ track, index, onPlay, onContextMenu, showArtwork }: TrackRowProps) {
   const currentTrack = usePlayerStore((s) => s.currentTrack);
   const isActive = currentTrack?.id === track.id;
   const navigate = useNavigate();
@@ -19,7 +20,10 @@ export function TrackRow({ track, index, onPlay, onContextMenu }: TrackRowProps)
   return (
     <div
       className={cn(
-        "group grid grid-cols-[2rem_1fr_1fr_4rem] items-center gap-4 rounded-xs px-3 py-2 hover:bg-accent/50",
+        "group grid items-center gap-4 rounded-xs px-3 py-2 hover:bg-accent/50",
+        showArtwork
+          ? "grid-cols-[2rem_2.5rem_1fr_1fr_4rem]"
+          : "grid-cols-[2rem_1fr_1fr_4rem]",
         isActive && "bg-accent/30",
       )}
       onDoubleClick={() => onPlay(track)}
@@ -36,6 +40,19 @@ export function TrackRow({ track, index, onPlay, onContextMenu }: TrackRowProps)
           <Play className="size-3" />
         </button>
       </div>
+      {showArtwork && (
+        <div className="flex items-center justify-center">
+          {track.artworkUrl ? (
+            <img
+              src={track.artworkUrl}
+              alt={track.albumName}
+              className="size-10 rounded-xs object-cover"
+            />
+          ) : (
+            <div className="size-10 rounded-xs bg-muted" />
+          )}
+        </div>
+      )}
       <div className="min-w-0">
         <button
           className={cn(

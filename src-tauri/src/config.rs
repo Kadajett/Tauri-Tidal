@@ -15,6 +15,8 @@ pub struct AppConfig {
     pub expires_at: Option<DateTime<Utc>>,
     #[serde(default)]
     pub user_id: Option<String>,
+    #[serde(default)]
+    pub display_name: Option<String>,
     #[serde(default = "default_country_code")]
     pub country_code: String,
     #[serde(default = "default_audio_quality")]
@@ -40,12 +42,13 @@ fn default_volume() -> f32 {
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            client_id: "clYWgqLTNnt9DRRn".to_string(),
-            client_secret: "LfT459n190IfEYJ7xR7L86BOyUkcw6R80j54y6g1qVs=".to_string(),
+            client_id: "fX2JxdmntZWK0ixT".to_string(),
+            client_secret: "1Nn9AfDAjxrgJFJbKNWLeAyKGVGmINuXPPLHVXAvxAg=".to_string(),
             access_token: None,
             refresh_token: None,
             expires_at: None,
             user_id: None,
+            display_name: None,
             country_code: default_country_code(),
             audio_quality: default_audio_quality(),
             volume: default_volume(),

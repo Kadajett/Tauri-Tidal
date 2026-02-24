@@ -1,5 +1,5 @@
 use crate::api::client::TidalClient;
-use crate::api::models::Track;
+use crate::api::models::{FavoritesPage, RecommendationSection, Track};
 use crate::api::search::{get_first_relationship_id, parse_track};
 use crate::error::{AppError, AppResult};
 use std::collections::HashMap;
@@ -150,10 +150,7 @@ fn parse_v1_mix_items(body: &serde_json::Value) -> Vec<Track> {
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
-        let duration = item
-            .get("duration")
-            .and_then(|v| v.as_f64())
-            .unwrap_or(0.0);
+        let duration = item.get("duration").and_then(|v| v.as_f64()).unwrap_or(0.0);
         let track_number = item
             .get("trackNumber")
             .and_then(|v| v.as_u64())
@@ -228,30 +225,74 @@ fn parse_v1_mix_items(body: &serde_json::Value) -> Vec<Track> {
 }
 
 impl TidalClient {
-    pub async fn get_favorites(&self) -> AppResult<Vec<Track>> {
+    /// Fetch the authenticated user's profile from GET /users/me.
+    /// Returns (username, firstName, lastName) if available.
+    pub async fn get_user_profile(
+        &self,
+    ) -> AppResult<(Option<String>, Option<String>, Option<String>)> {
+        let response = self.get("/users/me").await?;
+        let body: serde_json::Value = response.json().await?;
+
+        let attrs = body.get("data").and_then(|d| d.get("attributes"));
+
+        let username = attrs
+            .and_then(|a| a.get("username"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        let first_name = attrs
+            .and_then(|a| a.get("firstName"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        let last_name = attrs
+            .and_then(|a| a.get("lastName"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        Ok((username, first_name, last_name))
+    }
+
+    /// Fetch favorites using cursor-based pagination.
+    /// `cursor` is None for the first page, or the cursor string from a previous response.
+    pub async fn get_favorites(&self, cursor: Option<&str>) -> AppResult<FavoritesPage> {
         let config = self.config().read().await;
         let user_id = config.user_id.clone().ok_or(AppError::AuthRequired)?;
         let country = config.country_code.clone();
         drop(config);
 
         let path = format!("/userCollections/{}/relationships/tracks", user_id);
-        let response = self
-            .get_with_query(
-                &path,
-                &[
-                    ("countryCode", country.as_str()),
-                    (
-                        "include",
-                        "tracks,tracks.artists,tracks.albums,tracks.albums.coverArt",
-                    ),
-                ],
-            )
-            .await?;
+        let mut params: Vec<(&str, &str)> = vec![
+            ("countryCode", country.as_str()),
+            (
+                "include",
+                "tracks,tracks.artists,tracks.albums,tracks.albums.coverArt",
+            ),
+        ];
+        if let Some(c) = cursor {
+            params.push(("page[cursor]", c));
+        }
+        let response = self.get_with_query(&path, &params).await?;
 
         let body: serde_json::Value = response.json().await?;
         let included = body.get("included").and_then(|v| v.as_array());
+        let tracks = parse_tracks_from_included(included);
 
-        Ok(parse_tracks_from_included(included))
+        // Extract next cursor from links.meta.nextCursor
+        let next_cursor = body
+            .get("links")
+            .and_then(|l| l.get("meta"))
+            .and_then(|m| m.get("nextCursor"))
+            .and_then(|v| v.as_str())
+            .map(String::from);
+
+        let has_more = next_cursor.is_some();
+
+        Ok(FavoritesPage {
+            tracks,
+            next_cursor,
+            has_more,
+        })
     }
 
     pub async fn toggle_favorite(&self, track_id: &str, add: bool) -> AppResult<()> {
@@ -276,7 +317,7 @@ impl TidalClient {
         Ok(())
     }
 
-    pub async fn get_recommendations(&self) -> AppResult<Vec<Track>> {
+    pub async fn get_recommendations(&self) -> AppResult<Vec<RecommendationSection>> {
         let config = self.config().read().await;
         let country = config.country_code.clone();
         let token = config.access_token.clone();
@@ -284,41 +325,88 @@ impl TidalClient {
 
         let token = token.ok_or(AppError::AuthRequired)?;
 
-        // Step 1: Get discovery mix IDs from v2 userRecommendations
+        // Step 1: Try userRecommendations API for personalized mixes
+        let mix_sections = self.fetch_recommendation_mixes(&token, &country).await;
+
+        if !mix_sections.is_empty() {
+            return Ok(mix_sections);
+        }
+
+        log::info!("No recommendation mixes available, building discovery from favorites");
+
+        // Step 2: Build discovery sections from similar tracks to user's favorites
+        self.build_discovery_from_favorites().await
+    }
+
+    /// Fetch personalized mixes from the userRecommendations endpoint and v1 mix items API.
+    /// Returns sections with mix names as titles. Returns empty vec on any failure.
+    async fn fetch_recommendation_mixes(
+        &self,
+        token: &str,
+        country: &str,
+    ) -> Vec<RecommendationSection> {
         let response = self
             .get_with_query(
                 "/userRecommendations/me",
                 &[
-                    ("countryCode", country.as_str()),
-                    ("include", "discoveryMixes,myMixes"),
+                    ("countryCode", country),
+                    ("include", "discoveryMixes,myMixes,newArrivalMixes"),
                 ],
             )
-            .await?;
+            .await;
 
-        let body: serde_json::Value = response.json().await?;
+        let body: serde_json::Value = match response {
+            Ok(r) => match r.json().await {
+                Ok(b) => b,
+                Err(e) => {
+                    log::warn!("Failed to parse userRecommendations response: {}", e);
+                    return Vec::new();
+                }
+            },
+            Err(e) => {
+                log::warn!("userRecommendations request failed: {}", e);
+                return Vec::new();
+            }
+        };
 
-        // Extract mix IDs from included resources
-        let mut mix_ids: Vec<String> = Vec::new();
+        // Build a map of mix_id -> (title, subtitle) from included resources
+        let mut mix_info: HashMap<String, (String, Option<String>)> = HashMap::new();
         if let Some(included) = body.get("included").and_then(|v| v.as_array()) {
             for item in included {
-                if let Some(id) = item.get("id").and_then(|v| v.as_str()) {
-                    mix_ids.push(id.to_string());
+                let id = item.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                if id.is_empty() {
+                    continue;
+                }
+                let title = item
+                    .get("attributes")
+                    .and_then(|a| a.get("title"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let subtitle = item
+                    .get("attributes")
+                    .and_then(|a| a.get("subTitle"))
+                    .and_then(|v| v.as_str())
+                    .map(String::from);
+                if !title.is_empty() {
+                    mix_info.insert(id.to_string(), (title, subtitle));
                 }
             }
         }
 
-        // Also check relationships.discoveryMixes.data for mix refs
-        if mix_ids.is_empty() {
-            if let Some(data) = body.get("data") {
-                for rel_key in &["discoveryMixes", "myMixes"] {
-                    if let Some(refs) = data
-                        .get("relationships")
-                        .and_then(|r| r.get(*rel_key))
-                        .and_then(|r| r.get("data"))
-                        .and_then(|d| d.as_array())
-                    {
-                        for r in refs {
-                            if let Some(id) = r.get("id").and_then(|v| v.as_str()) {
+        // Collect mix IDs from relationships, preserving category order
+        let mut mix_ids: Vec<String> = Vec::new();
+        if let Some(data) = body.get("data") {
+            for rel_key in &["myMixes", "discoveryMixes", "newArrivalMixes"] {
+                if let Some(refs) = data
+                    .get("relationships")
+                    .and_then(|r| r.get(*rel_key))
+                    .and_then(|r| r.get("data"))
+                    .and_then(|d| d.as_array())
+                {
+                    for r in refs {
+                        if let Some(id) = r.get("id").and_then(|v| v.as_str()) {
+                            if !mix_ids.contains(&id.to_string()) {
                                 mix_ids.push(id.to_string());
                             }
                         }
@@ -328,22 +416,23 @@ impl TidalClient {
         }
 
         if mix_ids.is_empty() {
-            log::warn!("No recommendation mixes found, falling back to favorites");
-            let favorites = self.get_favorites().await?;
-            return Ok(favorites.into_iter().take(20).collect());
+            mix_ids = mix_info.keys().cloned().collect();
         }
 
-        // Step 2: Fetch tracks from the first few mixes via v1 API
-        let mut all_tracks: Vec<Track> = Vec::new();
-        let max_mixes = mix_ids.len().min(3);
+        if mix_ids.is_empty() {
+            return Vec::new();
+        }
 
-        for mix_id in &mix_ids[..max_mixes] {
+        let max_mixes = mix_ids.len().min(6);
+        let mut sections: Vec<RecommendationSection> = Vec::new();
+
+        for (i, mix_id) in mix_ids[..max_mixes].iter().enumerate() {
             let url = format!("https://api.tidal.com/v1/mixes/{}/items", mix_id);
             let resp = self
                 .http_client()
                 .get(&url)
-                .bearer_auth(&token)
-                .query(&[("countryCode", country.as_str()), ("limit", "25")])
+                .bearer_auth(token)
+                .query(&[("countryCode", country), ("limit", "15")])
                 .send()
                 .await;
 
@@ -351,25 +440,88 @@ impl TidalClient {
                 Ok(r) if r.status().is_success() => {
                     if let Ok(body) = r.json::<serde_json::Value>().await {
                         let tracks = parse_v1_mix_items(&body);
-                        all_tracks.extend(tracks);
+                        if !tracks.is_empty() {
+                            let (title, subtitle) = mix_info
+                                .get(mix_id)
+                                .cloned()
+                                .unwrap_or_else(|| (format!("Mix {}", i + 1), None));
+                            sections.push(RecommendationSection {
+                                title,
+                                subtitle,
+                                tracks,
+                            });
+                        }
                     }
                 }
                 Ok(r) => {
-                    log::warn!("v1 mix items request failed with status {}", r.status());
+                    log::warn!("v1 mix items for {} failed: {}", mix_id, r.status());
                 }
                 Err(e) => {
-                    log::warn!("v1 mix items request failed: {}", e);
+                    log::warn!("v1 mix items for {} failed: {}", mix_id, e);
                 }
             }
         }
 
-        if all_tracks.is_empty() {
-            log::warn!("No tracks from mixes, falling back to favorites");
-            let favorites = self.get_favorites().await?;
-            return Ok(favorites.into_iter().take(20).collect());
+        sections
+    }
+
+    /// Build discovery sections by fetching similar tracks for the user's top favorites.
+    async fn build_discovery_from_favorites(&self) -> AppResult<Vec<RecommendationSection>> {
+        let page = self.get_favorites(None).await?;
+        let favorites = page.tracks;
+
+        if favorites.is_empty() {
+            return Ok(Vec::new());
         }
 
-        Ok(all_tracks)
+        // Pick up to 4 seed tracks spread across the favorites list
+        let seed_count = favorites.len().min(4);
+        let step = if favorites.len() > seed_count {
+            favorites.len() / seed_count
+        } else {
+            1
+        };
+        let seeds: Vec<&Track> = favorites.iter().step_by(step).take(seed_count).collect();
+
+        let mut sections: Vec<RecommendationSection> = Vec::new();
+
+        for seed in &seeds {
+            match self.get_similar_tracks(&seed.id).await {
+                Ok(similar) if !similar.is_empty() => {
+                    sections.push(RecommendationSection {
+                        title: format!("Because you like {}", seed.title),
+                        subtitle: Some(seed.artist_name.clone()),
+                        tracks: similar.into_iter().take(10).collect(),
+                    });
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    log::warn!("Failed to get similar tracks for {}: {}", seed.id, e);
+                }
+            }
+        }
+
+        if !sections.is_empty() {
+            let teaser: Vec<Track> = favorites.into_iter().take(10).collect();
+            if !teaser.is_empty() {
+                sections.push(RecommendationSection {
+                    title: "Your Favorites".to_string(),
+                    subtitle: None,
+                    tracks: teaser,
+                });
+            }
+        } else {
+            let tracks: Vec<Track> = favorites.into_iter().take(20).collect();
+            if !tracks.is_empty() {
+                sections.push(RecommendationSection {
+                    title: "Your Favorites".to_string(),
+                    subtitle: None,
+                    tracks,
+                });
+            }
+        }
+
+        Ok(sections)
     }
 
     pub async fn get_similar_tracks(&self, track_id: &str) -> AppResult<Vec<Track>> {

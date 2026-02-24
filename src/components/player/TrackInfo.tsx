@@ -7,6 +7,7 @@ import { useLibrary } from "@/hooks/useLibrary";
 
 export function TrackInfo() {
   const currentTrack = usePlayerStore((s) => s.currentTrack);
+  const quality = usePlayerStore((s) => s.quality);
   const isFavorite = useLibraryStore((s) => s.isFavorite);
   const { toggleFavorite } = useLibrary();
   const navigate = useNavigate();
@@ -41,16 +42,21 @@ export function TrackInfo() {
       )}
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm/5 font-medium">{currentTrack.title}</p>
-        <p className="truncate text-xs/4 text-muted-foreground">
+        <p className="flex items-center gap-1.5 truncate text-xs/4 text-muted-foreground">
           {currentTrack.artistId ? (
             <button
-              className="hover:underline hover:text-foreground"
+              className="truncate hover:underline hover:text-foreground"
               onClick={() => navigate(`/artist/${currentTrack.artistId}`)}
             >
               {currentTrack.artistName}
             </button>
           ) : (
-            currentTrack.artistName
+            <span className="truncate">{currentTrack.artistName}</span>
+          )}
+          {quality && (
+            <span className="shrink-0 rounded-xs border border-border px-1 py-px text-[10px]/3 font-medium uppercase text-muted-foreground">
+              {quality}
+            </span>
           )}
         </p>
       </div>

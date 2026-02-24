@@ -97,18 +97,27 @@ pub async fn save_queue_state(state: State<'_, AppState>) -> Result<(), AppError
 }
 
 #[tauri::command]
-pub async fn load_saved_queue(state: State<'_, AppState>) -> Result<QueueState, AppError> {
+pub async fn load_saved_queue() -> Result<QueueState, AppError> {
     let path = AppConfig::queue_path()?;
     if !path.exists() {
-        // No saved queue, return empty state
-        let queue = state.playback_queue.read().await;
-        return Ok(queue.state());
+        return Ok(QueueState {
+            tracks: Vec::new(),
+            current_index: None,
+            repeat_mode: RepeatMode::Off,
+            shuffled: false,
+        });
     }
 
     let content = std::fs::read_to_string(&path)?;
     let persisted: PersistedQueueState = serde_json::from_str(&content)?;
 
-    let mut queue = state.playback_queue.write().await;
-    queue.restore_from_persisted(persisted);
-    Ok(queue.state())
+    // Return the persisted state for the frontend to restore the current track display,
+    // but do NOT load it into the backend queue. The queue starts empty on each launch
+    // so the queue page only shows tracks from the current session.
+    Ok(QueueState {
+        tracks: persisted.tracks,
+        current_index: persisted.current_index,
+        repeat_mode: persisted.repeat_mode,
+        shuffled: persisted.shuffled,
+    })
 }

@@ -10,7 +10,85 @@ impl TidalClient {
         let country = config.country_code.clone();
         drop(config);
 
-        let response = self
+        let mut playlists = Vec::new();
+        let mut seen_ids = std::collections::HashSet::new();
+
+        // Strategy 1: Fetch user's playlist collection via userCollectionPlaylists.
+        // This returns playlists the user has saved/added, including those by other creators.
+        match self
+            .get_with_query(
+                "/userCollectionPlaylists/me/relationships/items",
+                &[
+                    ("countryCode", country.as_str()),
+                    ("include", "items,items.coverArt"),
+                ],
+            )
+            .await
+        {
+            Ok(response) => {
+                let body: serde_json::Value = response.json().await?;
+                let included = body.get("included").and_then(|v| v.as_array());
+
+                // Build artwork map from included artworks
+                let mut artwork_map: HashMap<String, String> = HashMap::new();
+                if let Some(items) = included {
+                    for item in items {
+                        if item.get("type").and_then(|v| v.as_str()) == Some("artworks") {
+                            let id = item
+                                .get("id")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("")
+                                .to_string();
+                            if let Some(href) = item
+                                .get("attributes")
+                                .and_then(|a| a.get("files"))
+                                .and_then(|v| v.as_array())
+                                .and_then(|arr| arr.last().or(arr.first()))
+                                .and_then(|f| f.get("href"))
+                                .and_then(|v| v.as_str())
+                            {
+                                artwork_map.insert(id, href.to_string());
+                            }
+                        }
+                    }
+                }
+
+                // Parse playlists from included resources
+                if let Some(items) = included {
+                    for item in items {
+                        if item.get("type").and_then(|v| v.as_str()) == Some("playlists") {
+                            let id = item.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                            let attrs = item.get("attributes").cloned().unwrap_or_default();
+                            let rels = item.get("relationships");
+                            if let Some(mut playlist) = parse_playlist(id, &attrs) {
+                                if playlist.artwork_url.is_none() {
+                                    playlist.artwork_url =
+                                        get_first_relationship_id(rels, "coverArt")
+                                            .and_then(|art_id| artwork_map.get(&art_id).cloned());
+                                }
+                                playlist.creator_id = get_first_relationship_id(rels, "owners");
+                                seen_ids.insert(playlist.id.clone());
+                                playlists.push(playlist);
+                            }
+                        }
+                    }
+                }
+                log::info!(
+                    "Fetched {} playlists from userCollectionPlaylists",
+                    playlists.len()
+                );
+            }
+            Err(e) => {
+                log::warn!(
+                    "userCollectionPlaylists fetch failed: {}, falling back to /playlists",
+                    e
+                );
+            }
+        }
+
+        // Strategy 2: Also fetch user-owned playlists via /playlists?filter[owners.id]=me.
+        // This catches any playlists the user created that might not be in their collection.
+        match self
             .get_with_query(
                 "/playlists",
                 &[
@@ -19,53 +97,61 @@ impl TidalClient {
                     ("include", "coverArt,owners"),
                 ],
             )
-            .await?;
+            .await
+        {
+            Ok(response) => {
+                let body: serde_json::Value = response.json().await?;
+                let data = body.get("data").and_then(|v| v.as_array());
+                let included = body.get("included").and_then(|v| v.as_array());
 
-        let body: serde_json::Value = response.json().await?;
-        let data = body.get("data").and_then(|v| v.as_array());
-        let included = body.get("included").and_then(|v| v.as_array());
+                let mut artwork_map: HashMap<String, String> = HashMap::new();
+                if let Some(items) = included {
+                    for item in items {
+                        if item.get("type").and_then(|v| v.as_str()) == Some("artworks") {
+                            let id = item
+                                .get("id")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("")
+                                .to_string();
+                            if let Some(href) = item
+                                .get("attributes")
+                                .and_then(|a| a.get("files"))
+                                .and_then(|v| v.as_array())
+                                .and_then(|arr| arr.last().or(arr.first()))
+                                .and_then(|f| f.get("href"))
+                                .and_then(|v| v.as_str())
+                            {
+                                artwork_map.insert(id, href.to_string());
+                            }
+                        }
+                    }
+                }
 
-        // Build artwork map from included artworks
-        let mut artwork_map: HashMap<String, String> = HashMap::new();
-        if let Some(items) = included {
-            for item in items {
-                if item.get("type").and_then(|v| v.as_str()) == Some("artworks") {
-                    let id = item
-                        .get("id")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_string();
-                    if let Some(href) = item
-                        .get("attributes")
-                        .and_then(|a| a.get("files"))
-                        .and_then(|v| v.as_array())
-                        .and_then(|arr| arr.last().or(arr.first()))
-                        .and_then(|f| f.get("href"))
-                        .and_then(|v| v.as_str())
-                    {
-                        artwork_map.insert(id, href.to_string());
+                if let Some(items) = data {
+                    for item in items {
+                        let id = item.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                        if seen_ids.contains(id) {
+                            continue; // Already added from collection
+                        }
+                        let attrs = item.get("attributes").cloned().unwrap_or_default();
+                        let rels = item.get("relationships");
+                        if let Some(mut playlist) = parse_playlist(id, &attrs) {
+                            if playlist.artwork_url.is_none() {
+                                playlist.artwork_url = get_first_relationship_id(rels, "coverArt")
+                                    .and_then(|art_id| artwork_map.get(&art_id).cloned());
+                            }
+                            playlist.creator_id = get_first_relationship_id(rels, "owners");
+                            playlists.push(playlist);
+                        }
                     }
                 }
             }
-        }
-
-        let mut playlists = Vec::new();
-        if let Some(items) = data {
-            for item in items {
-                let id = item.get("id").and_then(|v| v.as_str()).unwrap_or("");
-                let attrs = item.get("attributes").cloned().unwrap_or_default();
-                let rels = item.get("relationships");
-                if let Some(mut playlist) = parse_playlist(id, &attrs) {
-                    if playlist.artwork_url.is_none() {
-                        playlist.artwork_url = get_first_relationship_id(rels, "coverArt")
-                            .and_then(|art_id| artwork_map.get(&art_id).cloned());
-                    }
-                    playlist.creator_id = get_first_relationship_id(rels, "owners");
-                    playlists.push(playlist);
-                }
+            Err(e) => {
+                log::warn!("Owned playlists fetch failed: {}", e);
             }
         }
 
+        log::info!("Total playlists returned: {}", playlists.len());
         Ok(playlists)
     }
 

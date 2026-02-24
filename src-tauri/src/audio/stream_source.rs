@@ -1,17 +1,22 @@
-use std::collections::VecDeque;
-use std::io::{self, Read};
+use std::io::{self, Read, Seek, SeekFrom};
 use std::sync::{Arc, Condvar, Mutex};
 
-const MAX_BUFFER_SIZE: usize = 2 * 1024 * 1024; // 2MB back-pressure limit
+const MAX_BUFFER_SIZE: usize = 8 * 1024 * 1024; // 8MB back-pressure limit
 
 /// Shared state between the HTTP download task and the symphonia reader.
 struct StreamBuffer {
-    buffer: VecDeque<u8>,
+    /// All downloaded bytes (append-only from writer side).
+    data: Vec<u8>,
+    /// Read cursor position.
+    position: usize,
+    /// Whether the download has completed.
     finished: bool,
+    /// Download error, if any.
     error: Option<String>,
 }
 
-/// Adapter that makes an HTTP byte stream look like a `Read` + `symphonia::core::io::MediaSource`.
+/// Adapter that makes an HTTP byte stream look like a seekable `Read` + `symphonia::core::io::MediaSource`.
+/// All downloaded bytes are retained in memory so symphonia can seek backwards.
 pub struct HttpStreamSource {
     shared: Arc<(Mutex<StreamBuffer>, Condvar)>,
 }
@@ -20,7 +25,8 @@ impl HttpStreamSource {
     pub fn new() -> (Self, StreamWriter) {
         let shared = Arc::new((
             Mutex::new(StreamBuffer {
-                buffer: VecDeque::new(),
+                data: Vec::with_capacity(1024 * 1024), // Pre-allocate 1MB
+                position: 0,
                 finished: false,
                 error: None,
             }),
@@ -41,8 +47,8 @@ impl Read for HttpStreamSource {
         let (lock, cvar) = &*self.shared;
         let mut state = lock.lock().unwrap();
 
-        // Wait until we have data, the stream is finished, or there's an error
-        while state.buffer.is_empty() && !state.finished && state.error.is_none() {
+        // Wait until we have data beyond our position, the stream is finished, or there's an error
+        while state.position >= state.data.len() && !state.finished && state.error.is_none() {
             state = cvar.wait(state).unwrap();
         }
 
@@ -50,47 +56,58 @@ impl Read for HttpStreamSource {
             return Err(io::Error::new(io::ErrorKind::Other, err.clone()));
         }
 
-        if state.buffer.is_empty() && state.finished {
+        let available = state.data.len() - state.position;
+        if available == 0 && state.finished {
             return Ok(0); // EOF
         }
 
-        let to_read = buf.len().min(state.buffer.len());
-        let (front, back) = state.buffer.as_slices();
+        let to_read = buf.len().min(available);
+        buf[..to_read].copy_from_slice(&state.data[state.position..state.position + to_read]);
+        state.position += to_read;
 
-        if to_read <= front.len() {
-            buf[..to_read].copy_from_slice(&front[..to_read]);
-        } else {
-            let front_len = front.len();
-            buf[..front_len].copy_from_slice(front);
-            let remaining = to_read - front_len;
-            buf[front_len..front_len + remaining].copy_from_slice(&back[..remaining]);
-        }
-
-        state.buffer.drain(..to_read);
-
-        // Notify writer that buffer space is available
+        // Notify writer (for back-pressure, though we no longer drain bytes)
         cvar.notify_all();
 
         Ok(to_read)
     }
 }
 
-impl symphonia::core::io::MediaSource for HttpStreamSource {
-    fn is_seekable(&self) -> bool {
-        false
-    }
+impl Seek for HttpStreamSource {
+    fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
+        let (lock, _cvar) = &*self.shared;
+        let mut state = lock.lock().unwrap();
 
-    fn byte_len(&self) -> Option<u64> {
-        None
+        let new_pos = match pos {
+            SeekFrom::Start(offset) => offset as i64,
+            SeekFrom::Current(offset) => state.position as i64 + offset,
+            SeekFrom::End(offset) => state.data.len() as i64 + offset,
+        };
+
+        if new_pos < 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Seek to negative position",
+            ));
+        }
+
+        state.position = new_pos as usize;
+        Ok(state.position as u64)
     }
 }
 
-impl io::Seek for HttpStreamSource {
-    fn seek(&mut self, _pos: io::SeekFrom) -> io::Result<u64> {
-        Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "HttpStreamSource is not seekable",
-        ))
+impl symphonia::core::io::MediaSource for HttpStreamSource {
+    fn is_seekable(&self) -> bool {
+        true
+    }
+
+    fn byte_len(&self) -> Option<u64> {
+        let (lock, _) = &*self.shared;
+        let state = lock.lock().unwrap();
+        if state.finished {
+            Some(state.data.len() as u64)
+        } else {
+            None
+        }
     }
 }
 
@@ -104,8 +121,8 @@ impl StreamWriter {
         let (lock, cvar) = &*self.shared;
         let mut state = lock.lock().unwrap();
 
-        // Back-pressure: wait if buffer is full
-        while state.buffer.len() >= MAX_BUFFER_SIZE && !state.finished {
+        // Back-pressure: wait if we're too far ahead of the reader
+        while (state.data.len() - state.position) >= MAX_BUFFER_SIZE && !state.finished {
             state = cvar.wait(state).unwrap();
         }
 
@@ -113,7 +130,7 @@ impl StreamWriter {
             return Ok(());
         }
 
-        state.buffer.extend(data);
+        state.data.extend_from_slice(data);
         cvar.notify_all();
         Ok(())
     }

@@ -73,7 +73,9 @@ impl AudioDecoder {
 
         log::info!(
             "AudioDecoder ready: track_id={}, sample_rate={}, channels={}",
-            track_id, sample_rate, channels
+            track_id,
+            sample_rate,
+            channels
         );
 
         Ok(Self {
@@ -91,6 +93,32 @@ impl AudioDecoder {
 
     pub fn channels(&self) -> usize {
         self.channels
+    }
+
+    /// Seek to a position in the stream (in seconds).
+    pub fn seek(&mut self, position_seconds: f64) -> AppResult<()> {
+        use symphonia::core::formats::SeekTo;
+        use symphonia::core::units::Time;
+
+        let time = Time {
+            seconds: position_seconds as u64,
+            frac: position_seconds.fract(),
+        };
+
+        self.format_reader
+            .seek(
+                symphonia::core::formats::SeekMode::Coarse,
+                SeekTo::Time {
+                    time,
+                    track_id: Some(self.track_id),
+                },
+            )
+            .map_err(|e| AppError::Decode(format!("Seek failed: {}", e)))?;
+
+        // Reset the decoder state after seeking
+        self.decoder.reset();
+
+        Ok(())
     }
 
     /// Decode the next batch of samples. Returns None at EOF.

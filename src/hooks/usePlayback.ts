@@ -29,6 +29,13 @@ export function usePlayback() {
     try {
       if (state === "playing") {
         await tauri.pausePlayback();
+      } else if (state === "stopped") {
+        // When stopped (e.g. after app restart with a restored track),
+        // we need to actually start playback, not just resume.
+        const currentTrack = usePlayerStore.getState().currentTrack;
+        if (currentTrack) {
+          await tauri.playTrack(currentTrack.id);
+        }
       } else {
         await tauri.resumePlayback();
       }

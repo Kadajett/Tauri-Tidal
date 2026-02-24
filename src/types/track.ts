@@ -13,6 +13,12 @@ export interface Track {
   mediaTags: string[];
 }
 
+export interface FavoritesPage {
+  tracks: Track[];
+  nextCursor?: string;
+  hasMore: boolean;
+}
+
 export interface Album {
   id: string;
   title: string;
@@ -30,6 +36,12 @@ export interface Artist {
   id: string;
   name: string;
   pictureUrl?: string;
+}
+
+export interface RecommendationSection {
+  title: string;
+  subtitle?: string;
+  tracks: Track[];
 }
 
 export interface Playlist {

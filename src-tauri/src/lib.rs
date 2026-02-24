@@ -124,41 +124,106 @@ pub fn run() {
         .setup(move |app| {
             let app_handle = app.handle().clone();
 
-            // Auto-acquire client credentials token if needed
+            // Auto-refresh or acquire token on startup.
+            // Priority: refresh user token > client credentials fallback.
             let init_client = Arc::clone(&client_for_init);
             let init_config = Arc::clone(&config_for_init);
             tauri::async_runtime::spawn(async move {
                 let config = init_config.read().await;
-                let needs_token = config.access_token.is_none() || config.is_token_expired();
                 let client_id = config.client_id.clone();
                 let client_secret = config.client_secret.clone();
+                let refresh_token = config.refresh_token.clone();
+                let has_user_id = config.user_id.is_some();
                 drop(config);
 
-                if needs_token && !client_id.is_empty() {
-                    log::info!("Acquiring client credentials token...");
-                    match api::auth::client_credentials_token(
-                        init_client.http_client(),
-                        &client_id,
-                        &client_secret,
-                    )
-                    .await
-                    {
-                        Ok(token) => {
-                            let mut config = init_config.write().await;
-                            config.access_token = Some(token.access_token);
-                            config.expires_at = Some(
-                                chrono::Utc::now()
-                                    + chrono::Duration::seconds(token.expires_in as i64),
-                            );
-                            if let Err(e) = config.save() {
-                                log::error!("Failed to save token: {}", e);
-                            } else {
-                                log::info!("Client credentials token acquired and saved");
+                if client_id.is_empty() {
+                    return;
+                }
+
+                // If user was previously logged in (has refresh_token), ALWAYS refresh.
+                // We cannot tell if the saved token is a user PKCE token or a client_credentials
+                // token just by looking at it. A previous bug could have overwritten the user
+                // token with a client_credentials one that appears "valid" but only gives
+                // 30-second previews. Refreshing always gives us a proper user token.
+                if let Some(ref rt) = refresh_token {
+                    if has_user_id {
+                        log::info!("Refreshing user PKCE token (always refresh for logged-in users)...");
+                        match api::auth::refresh_user_token(
+                            init_client.http_client(),
+                            &client_id,
+                            rt,
+                        )
+                        .await
+                        {
+                            Ok(token) => {
+                                let mut config = init_config.write().await;
+                                config.access_token = Some(token.access_token);
+                                config.expires_at = Some(
+                                    chrono::Utc::now()
+                                        + chrono::Duration::seconds(token.expires_in as i64),
+                                );
+                                // Update refresh token if a new one was provided
+                                if let Some(new_rt) = token.refresh_token {
+                                    config.refresh_token = Some(new_rt);
+                                }
+                                if let Err(e) = config.save() {
+                                    log::error!("Failed to save refreshed token: {}", e);
+                                } else {
+                                    log::info!("User token refreshed successfully");
+                                }
+                                return;
+                            }
+                            Err(e) => {
+                                log::warn!("Token refresh failed: {}. User will need to re-login.", e);
+                                // Do NOT fall through to client_credentials when a user was
+                                // previously logged in. Client credentials tokens only give
+                                // 30-second previews, silently degrading the experience.
+                                return;
                             }
                         }
-                        Err(e) => {
-                            log::error!("Failed to acquire client credentials: {}", e);
+                    }
+                }
+
+                // Client credentials require a client_secret and only provide
+                // catalog-only (30s preview) access. Skip if no secret or user was logged in.
+                if has_user_id || client_secret.is_empty() {
+                    log::info!("Skipping client credentials (no secret or user was previously logged in)");
+                    return;
+                }
+
+                // Check if we already have a valid client credentials token
+                let config = init_config.read().await;
+                let needs_token = config.access_token.is_none() || config.is_token_expired();
+                drop(config);
+
+                if !needs_token {
+                    log::info!("Client credentials token still valid, skipping");
+                    return;
+                }
+
+                log::info!("Acquiring client credentials token (no user login history)...");
+                match api::auth::client_credentials_token(
+                    init_client.http_client(),
+                    &client_id,
+                    &client_secret,
+                )
+                .await
+                {
+                    Ok(token) => {
+                        let mut config = init_config.write().await;
+                        config.access_token = Some(token.access_token);
+                        config.expires_at = Some(
+                            chrono::Utc::now()
+                                + chrono::Duration::seconds(token.expires_in as i64),
+                        );
+                        if let Err(e) = config.save() {
+                            log::error!("Failed to save token: {}", e);
+                        } else {
+                            log::info!("Client credentials token acquired (catalog-only access)");
                         }
+                    }
+                    Err(e) => {
+                        log::error!("Failed to acquire client credentials: {}", e);
                     }
                 }
             });
@@ -326,6 +391,8 @@ pub fn run() {
                                                     duration: next_trk.duration,
                                                     artwork_url: next_trk
                                                         .artwork_url_sized(480, 480),
+                                                    codec: None,
+                                                    quality: None,
                                                 },
                                             );
                                             let _ = handle.emit(
@@ -488,6 +555,8 @@ pub fn run() {
                                                         duration: prev_trk.duration,
                                                         artwork_url: prev_trk
                                                             .artwork_url_sized(480, 480),
+                                                        codec: None,
+                                                        quality: None,
                                                     },
                                                 );
                                                 let _ = handle.emit(
@@ -653,6 +722,8 @@ pub fn run() {
                                     album: next_track.album_name.clone(),
                                     duration: next_track.duration,
                                     artwork_url: next_track.artwork_url_sized(480, 480),
+                                    codec: None,
+                                    quality: None,
                                 },
                             );
 
@@ -689,8 +760,10 @@ pub fn run() {
             // Auth
             commands::auth_commands::check_auth_status,
             commands::auth_commands::login,
+            commands::auth_commands::poll_login,
             commands::auth_commands::handle_auth_callback,
             commands::auth_commands::init_client_credentials,
+            commands::auth_commands::logout,
             // Playback
             commands::playback_commands::play_track,
             commands::playback_commands::play_tracks,

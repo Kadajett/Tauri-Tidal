@@ -1,4 +1,4 @@
-use crate::api::models::{Album, Artist, Track};
+use crate::api::models::{Album, Artist, RecommendationSection, Track};
 use crate::error::AppError;
 use tauri::State;
 
@@ -31,7 +31,9 @@ pub async fn get_artist_albums(
 }
 
 #[tauri::command]
-pub async fn get_recommendations(state: State<'_, AppState>) -> Result<Vec<Track>, AppError> {
+pub async fn get_recommendations(
+    state: State<'_, AppState>,
+) -> Result<Vec<RecommendationSection>, AppError> {
     state.tidal_client.get_recommendations().await
 }
 

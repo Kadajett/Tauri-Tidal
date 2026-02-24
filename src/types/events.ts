@@ -13,6 +13,8 @@ export interface TrackChangedPayload {
   album: string;
   duration: number;
   artwork_url?: string;
+  codec?: string;
+  quality?: string;
 }
 
 export interface StateChangedPayload {

@@ -22,6 +22,8 @@ pub struct TrackChangedPayload {
     pub album: String,
     pub duration: f64,
     pub artwork_url: Option<String>,
+    pub codec: Option<String>,
+    pub quality: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

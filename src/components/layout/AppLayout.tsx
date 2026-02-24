@@ -21,6 +21,7 @@ export function AppLayout() {
   const setProgress = usePlayerStore((s) => s.setProgress);
   const setState = usePlayerStore((s) => s.setState);
   const setCurrentTrack = usePlayerStore((s) => s.setCurrentTrack);
+  const setCodecInfo = usePlayerStore((s) => s.setCodecInfo);
   const setQueue = useQueueStore((s) => s.setQueue);
   const setRepeatMode = useQueueStore((s) => s.setRepeatMode);
   const setShuffled = useQueueStore((s) => s.setShuffled);
@@ -43,8 +44,9 @@ export function AppLayout() {
         artworkUrl: payload.artwork_url,
         mediaTags: [],
       });
+      setCodecInfo(payload.codec ?? null, payload.quality ?? null);
     },
-    [setCurrentTrack],
+    [setCurrentTrack, setCodecInfo],
   );
 
   const handleStateChanged = useCallback(
@@ -108,10 +110,9 @@ export function AppLayout() {
     }).catch((err) => console.error("Failed to load player prefs:", err));
 
     tauri.loadSavedQueue().then((queue) => {
-      setQueue(queue.tracks, queue.currentIndex);
-      setRepeatMode(queue.repeatMode);
-      setShuffled(queue.shuffled);
-      // Set the current track in the player store (without starting playback)
+      // Only restore the current track for the footer player display.
+      // Do NOT populate the queue store with all tracks from the previous session,
+      // so the queue page starts empty and only shows explicitly queued tracks.
       if (queue.currentIndex != null && queue.tracks[queue.currentIndex]) {
         const track = queue.tracks[queue.currentIndex];
         usePlayerStore.getState().setCurrentTrack(track);
