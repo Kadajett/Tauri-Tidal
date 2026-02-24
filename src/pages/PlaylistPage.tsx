@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router";
 import { Button } from "@/components/ui/button";
+import { ProxiedImage } from "@/components/ui/proxied-image";
 import { TrackList } from "@/components/track/TrackList";
 import { Skeleton } from "@/components/ui/skeleton";
 import { usePlayback } from "@/hooks/usePlayback";
@@ -44,11 +45,11 @@ export function PlaylistPage() {
     <div className="flex flex-col gap-6 p-6">
       <div className="flex gap-6">
         {playlist.artworkUrl ? (
-          <img
+          <ProxiedImage
             src={playlist.artworkUrl}
             alt={playlist.name}
             className="size-48 rounded-sm object-cover shadow-sm"
-            referrerPolicy="no-referrer"
+            fallbackClassName="size-48 rounded-sm bg-muted"
           />
         ) : (
           <div className="size-48 rounded-sm bg-muted" />

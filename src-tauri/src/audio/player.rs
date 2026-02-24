@@ -285,7 +285,10 @@ impl AudioPlayer {
         }
 
         {
-            let (_lock, cvar) = &*self.ring;
+            let (lock, cvar) = &*self.ring;
+            let mut ring = lock.lock().unwrap();
+            ring.buffer.clear();
+            ring.finished = false;
             cvar.notify_all();
         }
 

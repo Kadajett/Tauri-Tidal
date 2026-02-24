@@ -182,7 +182,7 @@ impl Track {
     pub fn resolve_artwork(&mut self) {
         if let Some(ref url) = self.artwork_url {
             if url.contains("{width}") || url.contains("{height}") {
-                self.artwork_url = Some(resolve_artwork_url(url, 480, 480));
+                self.artwork_url = Some(resolve_artwork_url(url, 640, 640));
             }
         }
     }
@@ -198,7 +198,7 @@ impl Album {
     pub fn resolve_artwork(&mut self) {
         if let Some(ref url) = self.artwork_url {
             if url.contains("{width}") || url.contains("{height}") {
-                self.artwork_url = Some(resolve_artwork_url(url, 480, 480));
+                self.artwork_url = Some(resolve_artwork_url(url, 640, 640));
             }
         }
     }
@@ -208,7 +208,7 @@ impl Artist {
     pub fn resolve_artwork(&mut self) {
         if let Some(ref url) = self.picture_url {
             if url.contains("{width}") || url.contains("{height}") {
-                self.picture_url = Some(resolve_artwork_url(url, 480, 480));
+                self.picture_url = Some(resolve_artwork_url(url, 640, 640));
             }
         }
     }
@@ -218,7 +218,7 @@ impl Playlist {
     pub fn resolve_artwork(&mut self) {
         if let Some(ref url) = self.artwork_url {
             if url.contains("{width}") || url.contains("{height}") {
-                self.artwork_url = Some(resolve_artwork_url(url, 480, 480));
+                self.artwork_url = Some(resolve_artwork_url(url, 640, 640));
             }
         }
     }

@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useParams } from "react-router";
 import { Play, Shuffle } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ProxiedImage } from "@/components/ui/proxied-image";
 import { AlbumCard } from "@/components/cards/AlbumCard";
 import { Skeleton } from "@/components/ui/skeleton";
 import { usePlayback } from "@/hooks/usePlayback";
@@ -67,11 +68,11 @@ export function ArtistPage() {
     <div className="flex flex-col gap-6 p-6">
       <div className="flex items-center gap-6">
         {artist.pictureUrl ? (
-          <img
+          <ProxiedImage
             src={artist.pictureUrl}
             alt={artist.name}
             className="size-40 rounded-full object-cover shadow-sm"
-            referrerPolicy="no-referrer"
+            fallbackClassName="size-40 rounded-full bg-muted"
           />
         ) : (
           <div className="size-40 rounded-full bg-muted" />

@@ -366,7 +366,7 @@ async fn play_track_internal(
             artist: track.artist_name.clone(),
             album: track.album_name.clone(),
             duration: track.duration,
-            artwork_url: track.artwork_url_sized(480, 480),
+            artwork_url: track.artwork_url_sized(640, 640),
             codec: playback_codec,
             quality: quality_label,
         },

@@ -1,4 +1,5 @@
 import { useNavigate } from "react-router";
+import { ProxiedImage } from "@/components/ui/proxied-image";
 import type { Album } from "@/types/track";
 
 interface AlbumCardProps {
@@ -14,11 +15,11 @@ export function AlbumCard({ album }: AlbumCardProps) {
       onClick={() => navigate(`/album/${album.id}`)}
     >
       {album.artworkUrl ? (
-        <img
+        <ProxiedImage
           src={album.artworkUrl}
           alt={album.title}
           className="aspect-square w-full rounded-xs object-cover"
-          referrerPolicy="no-referrer"
+          fallbackClassName="aspect-square w-full rounded-xs bg-muted"
         />
       ) : (
         <div className="aspect-square w-full rounded-xs bg-muted" />

@@ -406,7 +406,7 @@ pub fn run() {
                                                     album: next_trk.album_name.clone(),
                                                     duration: next_trk.duration,
                                                     artwork_url: next_trk
-                                                        .artwork_url_sized(480, 480),
+                                                        .artwork_url_sized(640, 640),
                                                     codec: None,
                                                     quality: None,
                                                 },
@@ -552,7 +552,7 @@ pub fn run() {
                                                         album: prev_trk.album_name.clone(),
                                                         duration: prev_trk.duration,
                                                         artwork_url: prev_trk
-                                                            .artwork_url_sized(480, 480),
+                                                            .artwork_url_sized(640, 640),
                                                         codec: None,
                                                         quality: None,
                                                     },
@@ -796,7 +796,7 @@ pub fn run() {
                                     artist: next_track.artist_name.clone(),
                                     album: next_track.album_name.clone(),
                                     duration: next_track.duration,
-                                    artwork_url: next_track.artwork_url_sized(480, 480),
+                                    artwork_url: next_track.artwork_url_sized(640, 640),
                                     codec: None,
                                     quality: None,
                                 },
@@ -887,6 +887,8 @@ pub fn run() {
             commands::browse_commands::get_artist_albums,
             commands::browse_commands::get_recommendations,
             commands::browse_commands::get_similar_tracks,
+            // Images
+            commands::image_commands::proxy_image,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

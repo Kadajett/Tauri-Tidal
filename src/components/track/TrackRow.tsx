@@ -1,5 +1,6 @@
 import { Play } from "lucide-react";
 import { useNavigate } from "react-router";
+import { ProxiedImage } from "@/components/ui/proxied-image";
 import type { Track } from "@/types/track";
 import { formatTime, cn } from "@/lib/utils";
 import { usePlayerStore } from "@/stores/playerStore";
@@ -43,11 +44,11 @@ export function TrackRow({ track, index, onPlay, onContextMenu, showArtwork }: T
       {showArtwork && (
         <div className="flex items-center justify-center">
           {track.artworkUrl ? (
-            <img
+            <ProxiedImage
               src={track.artworkUrl}
               alt={track.albumName}
               className="size-10 rounded-xs object-cover"
-              referrerPolicy="no-referrer"
+              fallbackClassName="size-10 rounded-xs bg-muted"
             />
           ) : (
             <div className="size-10 rounded-xs bg-muted" />

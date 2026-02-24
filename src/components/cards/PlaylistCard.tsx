@@ -1,4 +1,5 @@
 import { useNavigate } from "react-router";
+import { ProxiedImage } from "@/components/ui/proxied-image";
 import type { Playlist } from "@/types/track";
 
 interface PlaylistCardProps {
@@ -14,11 +15,11 @@ export function PlaylistCard({ playlist }: PlaylistCardProps) {
       onClick={() => navigate(`/playlist/${playlist.id}`)}
     >
       {playlist.artworkUrl ? (
-        <img
+        <ProxiedImage
           src={playlist.artworkUrl}
           alt={playlist.name}
           className="aspect-square w-full rounded-xs object-cover"
-          referrerPolicy="no-referrer"
+          fallbackClassName="aspect-square w-full rounded-xs bg-muted"
         />
       ) : (
         <div className="aspect-square w-full rounded-xs bg-muted" />
