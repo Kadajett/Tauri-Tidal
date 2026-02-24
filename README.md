@@ -1,5 +1,7 @@
 # TauriTidal
 
+Still in VERY early development. Expect bugs.
+
 A native desktop player for Tidal, built with Tauri v2, React, and Rust.
 
 TauriTidal connects directly to the Tidal API to stream lossless audio through a native Rust audio pipeline. It integrates with macOS media keys and Now Playing, runs as a lightweight native app (not Electron), and gives you full control over your library, playlists, and queue.
