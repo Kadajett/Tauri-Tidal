@@ -71,6 +71,7 @@ export function ArtistPage() {
             src={artist.pictureUrl}
             alt={artist.name}
             className="size-40 rounded-full object-cover shadow-sm"
+            referrerPolicy="no-referrer"
           />
         ) : (
           <div className="size-40 rounded-full bg-muted" />

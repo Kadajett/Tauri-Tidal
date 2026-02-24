@@ -18,6 +18,7 @@ export function PlaylistCard({ playlist }: PlaylistCardProps) {
           src={playlist.artworkUrl}
           alt={playlist.name}
           className="aspect-square w-full rounded-xs object-cover"
+          referrerPolicy="no-referrer"
         />
       ) : (
         <div className="aspect-square w-full rounded-xs bg-muted" />

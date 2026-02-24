@@ -18,6 +18,7 @@ export function ArtistCard({ artist }: ArtistCardProps) {
           src={artist.pictureUrl}
           alt={artist.name}
           className="aspect-square w-full rounded-full object-cover"
+          referrerPolicy="no-referrer"
         />
       ) : (
         <div className="aspect-square w-full rounded-full bg-muted" />

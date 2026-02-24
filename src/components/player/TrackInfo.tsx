@@ -1,9 +1,29 @@
+import { useState } from "react";
 import { Heart } from "lucide-react";
 import { useNavigate } from "react-router";
 import { Button } from "@/components/ui/button";
 import { usePlayerStore } from "@/stores/playerStore";
 import { useLibraryStore } from "@/stores/libraryStore";
 import { useLibrary } from "@/hooks/useLibrary";
+
+function ArtworkImage({ src, alt }: { src: string; alt: string }) {
+  const [failed, setFailed] = useState(false);
+
+  if (failed) {
+    return <div className="size-12 rounded-xs bg-muted" />;
+  }
+
+  return (
+    <img
+      src={src}
+      alt={alt}
+      className="size-12 rounded-xs object-cover"
+      referrerPolicy="no-referrer"
+      crossOrigin="anonymous"
+      onError={() => setFailed(true)}
+    />
+  );
+}
 
 export function TrackInfo() {
   const currentTrack = usePlayerStore((s) => s.currentTrack);
@@ -19,11 +39,7 @@ export function TrackInfo() {
   const favorited = isFavorite(currentTrack.id);
 
   const artwork = currentTrack.artworkUrl ? (
-    <img
-      src={currentTrack.artworkUrl}
-      alt={currentTrack.albumName}
-      className="size-12 rounded-xs object-cover"
-    />
+    <ArtworkImage src={currentTrack.artworkUrl} alt={currentTrack.albumName} />
   ) : (
     <div className="size-12 rounded-xs bg-muted" />
   );

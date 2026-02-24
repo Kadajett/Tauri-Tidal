@@ -55,6 +55,7 @@ export function AlbumPage() {
             src={album.artworkUrl}
             alt={album.title}
             className="size-48 rounded-sm object-cover shadow-sm"
+            referrerPolicy="no-referrer"
           />
         ) : (
           <div className="size-48 rounded-sm bg-muted" />

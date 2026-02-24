@@ -586,9 +586,16 @@ pub fn run() {
             tauri::async_runtime::spawn(async move {
                 use tauri::{Emitter, Manager};
                 let mut preload_triggered = false;
+                let mut advancing = false; // Guard against re-entering auto-advance
 
                 loop {
                     tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+
+                    // Skip polling while we're in the middle of advancing to the next track
+                    if advancing {
+                        continue;
+                    }
+
                     let player = player_for_progress.read().await;
                     let is_playing = player.is_playing();
                     let is_finished = player.is_finished();
@@ -623,9 +630,12 @@ pub fn run() {
                             );
                         }
 
-                        // Preload next track when within 30s of the end
+                        // Preload next track when within 30s of the end.
+                        // Use duration > 0.0 to avoid div-by-zero; drop the remaining > 0.0
+                        // check since position can slightly overshoot duration due to
+                        // sample counting vs API metadata mismatch.
                         let remaining = duration - position;
-                        if remaining > 0.0 && remaining < 30.0 && !preload_triggered {
+                        if duration > 0.0 && remaining < 30.0 && !preload_triggered {
                             preload_triggered = true;
                             let queue = queue_for_progress.read().await;
                             if let Some(next) = queue.peek_next() {
@@ -659,8 +669,15 @@ pub fn run() {
 
                     // Auto-advance when track finishes
                     if is_finished && duration > 0.0 {
+                        advancing = true; // Block re-entry while we fetch/play
                         log::info!("Track finished, auto-advancing...");
                         let _ = app_handle.emit(events::PLAYBACK_TRACK_ENDED, ());
+
+                        // Stop the old player immediately so is_finished resets
+                        {
+                            let mut player = player_for_progress.write().await;
+                            player.stop();
+                        }
 
                         // Advance queue
                         let mut queue = queue_for_progress.write().await;
@@ -675,12 +692,12 @@ pub fn run() {
                                 pl.take()
                             };
 
-                            let mut player = player_for_progress.write().await;
                             if let Some(preloaded) =
                                 preloaded.filter(|p| p.track_id == next_track.id)
                             {
                                 log::info!("Using preloaded track for gapless playback");
                                 let codec_hint = preloaded.codec_hint.as_deref();
+                                let mut player = player_for_progress.write().await;
                                 match player.play_stream(
                                     preloaded.source,
                                     codec_hint,
@@ -689,12 +706,12 @@ pub fn run() {
                                     Ok(()) => {}
                                     Err(e) => {
                                         log::error!("Failed to play preloaded track: {}", e);
+                                        advancing = false;
                                         continue;
                                     }
                                 }
                             } else {
                                 // Fetch and play normally
-                                drop(player);
                                 let client = &client_for_progress;
                                 match client.get_track_manifest(&next_track.id).await {
                                     Ok(manifest) => {
@@ -712,11 +729,13 @@ pub fn run() {
                                             next_track.duration,
                                         ) {
                                             log::error!("Failed to play next track: {}", e);
+                                            advancing = false;
                                             continue;
                                         }
                                     }
                                     Err(e) => {
                                         log::error!("Failed to get manifest for next track: {}", e);
+                                        advancing = false;
                                         continue;
                                     }
                                 }
@@ -745,12 +764,11 @@ pub fn run() {
                                 },
                             );
 
+                            let _ = app_handle.emit(events::PLAYBACK_QUEUE_CHANGED, ());
+
                             preload_triggered = false;
                         } else {
-                            // No next track, stop playback
-                            let mut player = player_for_progress.write().await;
-                            player.stop();
-                            drop(player);
+                            // No next track, already stopped above
                             *track_for_progress.write().await = None;
 
                             let _ = app_handle.emit(
@@ -762,6 +780,7 @@ pub fn run() {
                             #[cfg(target_os = "macos")]
                             macos::now_playing::clear_now_playing();
                         }
+                        advancing = false;
                     }
                 }
             });

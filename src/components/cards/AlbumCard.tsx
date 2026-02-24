@@ -18,6 +18,7 @@ export function AlbumCard({ album }: AlbumCardProps) {
           src={album.artworkUrl}
           alt={album.title}
           className="aspect-square w-full rounded-xs object-cover"
+          referrerPolicy="no-referrer"
         />
       ) : (
         <div className="aspect-square w-full rounded-xs bg-muted" />
