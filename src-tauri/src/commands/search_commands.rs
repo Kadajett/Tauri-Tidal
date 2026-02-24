@@ -11,7 +11,9 @@ pub async fn search(
     limit: Option<u32>,
 ) -> Result<SearchResults, AppError> {
     let limit = limit.unwrap_or(20);
-    state.tidal_client.search(&query, limit).await
+    let mut results = state.tidal_client.search(&query, limit).await?;
+    results.resolve_all_artwork();
+    Ok(results)
 }
 
 #[tauri::command]

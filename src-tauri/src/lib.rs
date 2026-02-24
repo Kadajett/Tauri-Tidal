@@ -4,6 +4,7 @@ mod commands;
 mod config;
 mod error;
 mod events;
+#[cfg(target_os = "macos")]
 mod macos;
 
 use api::client::TidalClient;
@@ -17,8 +18,11 @@ use tokio::sync::{Mutex, RwLock};
 
 /// Wrapper to make ObjC retained objects Send+Sync.
 /// These tokens are only kept alive, never accessed across threads.
+#[cfg(target_os = "macos")]
 struct SendRetainedTokens(Vec<objc2::rc::Retained<objc2::runtime::AnyObject>>);
+#[cfg(target_os = "macos")]
 unsafe impl Send for SendRetainedTokens {}
+#[cfg(target_os = "macos")]
 unsafe impl Sync for SendRetainedTokens {}
 
 pub struct AppState {
@@ -28,7 +32,8 @@ pub struct AppState {
     pub current_track: Arc<RwLock<Option<Track>>>,
     pub pkce_verifier: Mutex<Option<String>>,
     pub preloaded_track: Mutex<Option<PreloadedTrack>>,
-    /// Keep media key handler tokens alive for the lifetime of the app
+    /// Keep media key handler tokens alive for the lifetime of the app (macOS only)
+    #[cfg(target_os = "macos")]
     _media_key_tokens: std::sync::Mutex<SendRetainedTokens>,
 }
 
@@ -114,6 +119,7 @@ pub fn run() {
         current_track,
         pkce_verifier: Mutex::new(None),
         preloaded_track: Mutex::new(None),
+        #[cfg(target_os = "macos")]
         _media_key_tokens: std::sync::Mutex::new(SendRetainedTokens(Vec::new())),
     };
 
@@ -147,7 +153,9 @@ pub fn run() {
                 // 30-second previews. Refreshing always gives us a proper user token.
                 if let Some(ref rt) = refresh_token {
                     if has_user_id {
-                        log::info!("Refreshing user PKCE token (always refresh for logged-in users)...");
+                        log::info!(
+                            "Refreshing user PKCE token (always refresh for logged-in users)..."
+                        );
                         match api::auth::refresh_user_token(
                             init_client.http_client(),
                             &client_id,
@@ -174,7 +182,10 @@ pub fn run() {
                                 return;
                             }
                             Err(e) => {
-                                log::warn!("Token refresh failed: {}. User will need to re-login.", e);
+                                log::warn!(
+                                    "Token refresh failed: {}. User will need to re-login.",
+                                    e
+                                );
                                 // Do NOT fall through to client_credentials when a user was
                                 // previously logged in. Client credentials tokens only give
                                 // 30-second previews, silently degrading the experience.
@@ -187,7 +198,9 @@ pub fn run() {
                 // Client credentials require a client_secret and only provide
                 // catalog-only (30s preview) access. Skip if no secret or user was logged in.
                 if has_user_id || client_secret.is_empty() {
-                    log::info!("Skipping client credentials (no secret or user was previously logged in)");
+                    log::info!(
+                        "Skipping client credentials (no secret or user was previously logged in)"
+                    );
                     return;
                 }
 
@@ -213,8 +226,7 @@ pub fn run() {
                         let mut config = init_config.write().await;
                         config.access_token = Some(token.access_token);
                         config.expires_at = Some(
-                            chrono::Utc::now()
-                                + chrono::Duration::seconds(token.expires_in as i64),
+                            chrono::Utc::now() + chrono::Duration::seconds(token.expires_in as i64),
                         );
                         if let Err(e) = config.save() {
                             log::error!("Failed to save token: {}", e);
@@ -228,9 +240,10 @@ pub fn run() {
                 }
             });
 
-            // Defer media key registration until after app finishes launching.
+            // Defer media key registration until after app finishes launching (macOS only).
             // Calling ObjC MediaPlayer APIs synchronously during applicationDidFinishLaunching
             // causes a panic that cannot unwind through ObjC frames, resulting in SIGABRT.
+            #[cfg(target_os = "macos")]
             {
                 let deferred_handle = app.handle().clone();
                 let deferred_player = Arc::clone(&player_for_progress);
@@ -372,7 +385,10 @@ pub fn run() {
                                             match result {
                                                 Ok(Ok(())) => {}
                                                 Ok(Err(e)) => {
-                                                    log::error!("Media key next play failed: {}", e);
+                                                    log::error!(
+                                                        "Media key next play failed: {}",
+                                                        e
+                                                    );
                                                     return;
                                                 }
                                                 Err(e) => {
@@ -453,24 +469,17 @@ pub fn run() {
                                                 let dur = current.duration;
                                                 let result =
                                                     tokio::task::spawn_blocking(move || {
-                                                        let rt =
-                                                            tokio::runtime::Handle::current();
-                                                        let mut p =
-                                                            rt.block_on(player_ref.write());
-                                                        p.play_stream(
-                                                            source,
-                                                            Some(&codec),
-                                                            dur,
-                                                        )
+                                                        let rt = tokio::runtime::Handle::current();
+                                                        let mut p = rt.block_on(player_ref.write());
+                                                        p.play_stream(source, Some(&codec), dur)
                                                     })
                                                     .await;
-                                                if let Err(e) = result
-                                                    .unwrap_or_else(|e| {
-                                                        Err(crate::error::AppError::Audio(
-                                                            format!("join error: {}", e),
-                                                        ))
-                                                    })
-                                                {
+                                                if let Err(e) = result.unwrap_or_else(|e| {
+                                                    Err(crate::error::AppError::Audio(format!(
+                                                        "join error: {}",
+                                                        e
+                                                    )))
+                                                }) {
                                                     log::error!(
                                                         "Media key prev restart failed: {}",
                                                         e
@@ -511,15 +520,9 @@ pub fn run() {
                                                 let dur = prev_trk.duration;
                                                 let result =
                                                     tokio::task::spawn_blocking(move || {
-                                                        let rt =
-                                                            tokio::runtime::Handle::current();
-                                                        let mut p =
-                                                            rt.block_on(player_ref.write());
-                                                        p.play_stream(
-                                                            source,
-                                                            Some(&codec),
-                                                            dur,
-                                                        )
+                                                        let rt = tokio::runtime::Handle::current();
+                                                        let mut p = rt.block_on(player_ref.write());
+                                                        p.play_stream(source, Some(&codec), dur)
                                                     })
                                                     .await;
                                                 match result {
@@ -539,19 +542,14 @@ pub fn run() {
                                                         return;
                                                     }
                                                 }
-                                                *track_ref.write().await =
-                                                    Some(prev_trk.clone());
+                                                *track_ref.write().await = Some(prev_trk.clone());
                                                 let _ = handle.emit(
                                                     events::PLAYBACK_TRACK_CHANGED,
                                                     events::TrackChangedPayload {
                                                         track_id: prev_trk.id.clone(),
                                                         title: prev_trk.title.clone(),
-                                                        artist: prev_trk
-                                                            .artist_name
-                                                            .clone(),
-                                                        album: prev_trk
-                                                            .album_name
-                                                            .clone(),
+                                                        artist: prev_trk.artist_name.clone(),
+                                                        album: prev_trk.album_name.clone(),
                                                         duration: prev_trk.duration,
                                                         artwork_url: prev_trk
                                                             .artwork_url_sized(480, 480),
@@ -562,8 +560,7 @@ pub fn run() {
                                                 let _ = handle.emit(
                                                     events::PLAYBACK_STATE_CHANGED,
                                                     events::StateChangedPayload {
-                                                        state:
-                                                            events::PlaybackState::Playing,
+                                                        state: events::PlaybackState::Playing,
                                                     },
                                                 );
                                                 macos::now_playing::update_now_playing(
@@ -575,10 +572,7 @@ pub fn run() {
                                                     true,
                                                 );
                                             }
-                                            Err(e) => log::error!(
-                                                "Media key prev failed: {}",
-                                                e
-                                            ),
+                                            Err(e) => log::error!("Media key prev failed: {}", e),
                                         }
                                     }
                                 }
@@ -617,6 +611,7 @@ pub fn run() {
                             },
                         );
 
+                        #[cfg(target_os = "macos")]
                         if let Some(track) = track_for_progress.read().await.as_ref() {
                             macos::now_playing::update_now_playing(
                                 &track.title,
@@ -649,7 +644,8 @@ pub fn run() {
                                                 manifest.uri,
                                                 client.http_client().clone(),
                                             );
-                                            let state: tauri::State<'_, AppState> = app_h.state::<AppState>();
+                                            let state: tauri::State<'_, AppState> =
+                                                app_h.state::<AppState>();
                                             let mut pl = state.preloaded_track.lock().await;
                                             *pl = Some(preloaded);
                                             log::info!("Next track preloaded successfully");
@@ -680,10 +676,16 @@ pub fn run() {
                             };
 
                             let mut player = player_for_progress.write().await;
-                            if let Some(preloaded) = preloaded.filter(|p| p.track_id == next_track.id) {
+                            if let Some(preloaded) =
+                                preloaded.filter(|p| p.track_id == next_track.id)
+                            {
                                 log::info!("Using preloaded track for gapless playback");
                                 let codec_hint = preloaded.codec_hint.as_deref();
-                                match player.play_stream(preloaded.source, codec_hint, preloaded.duration) {
+                                match player.play_stream(
+                                    preloaded.source,
+                                    codec_hint,
+                                    preloaded.duration,
+                                ) {
                                     Ok(()) => {}
                                     Err(e) => {
                                         log::error!("Failed to play preloaded track: {}", e);
@@ -696,10 +698,19 @@ pub fn run() {
                                 let client = &client_for_progress;
                                 match client.get_track_manifest(&next_track.id).await {
                                     Ok(manifest) => {
-                                        let (source, writer) = audio::stream_source::HttpStreamSource::new();
-                                        AudioPlayer::start_download(writer, manifest.uri, client.http_client().clone());
+                                        let (source, writer) =
+                                            audio::stream_source::HttpStreamSource::new();
+                                        AudioPlayer::start_download(
+                                            writer,
+                                            manifest.uri,
+                                            client.http_client().clone(),
+                                        );
                                         let mut player = player_for_progress.write().await;
-                                        if let Err(e) = player.play_stream(source, Some(&manifest.codec), next_track.duration) {
+                                        if let Err(e) = player.play_stream(
+                                            source,
+                                            Some(&manifest.codec),
+                                            next_track.duration,
+                                        ) {
                                             log::error!("Failed to play next track: {}", e);
                                             continue;
                                         }
@@ -748,6 +759,7 @@ pub fn run() {
                                     state: events::PlaybackState::Stopped,
                                 },
                             );
+                            #[cfg(target_os = "macos")]
                             macos::now_playing::clear_now_playing();
                         }
                     }

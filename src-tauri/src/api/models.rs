@@ -163,21 +163,81 @@ pub struct AuthStatus {
     pub country_code: String,
 }
 
+/// Resolve `{width}` and `{height}` placeholders in an artwork URL.
+/// Returns the URL with placeholders replaced by the given dimensions.
+pub fn resolve_artwork_url(url: &str, width: u32, height: u32) -> String {
+    url.replace("{width}", &width.to_string())
+        .replace("{height}", &height.to_string())
+}
+
 // Artwork helpers
 impl Track {
     pub fn artwork_url_sized(&self, width: u32, height: u32) -> Option<String> {
-        self.artwork_url.as_ref().map(|url| {
-            url.replace("{width}", &width.to_string())
-                .replace("{height}", &height.to_string())
-        })
+        self.artwork_url
+            .as_ref()
+            .map(|url| resolve_artwork_url(url, width, height))
+    }
+
+    /// Resolve artwork URL placeholders in-place with a default size.
+    pub fn resolve_artwork(&mut self) {
+        if let Some(ref url) = self.artwork_url {
+            if url.contains("{width}") || url.contains("{height}") {
+                self.artwork_url = Some(resolve_artwork_url(url, 480, 480));
+            }
+        }
     }
 }
 
 impl Album {
     pub fn artwork_url_sized(&self, width: u32, height: u32) -> Option<String> {
-        self.artwork_url.as_ref().map(|url| {
-            url.replace("{width}", &width.to_string())
-                .replace("{height}", &height.to_string())
-        })
+        self.artwork_url
+            .as_ref()
+            .map(|url| resolve_artwork_url(url, width, height))
+    }
+
+    pub fn resolve_artwork(&mut self) {
+        if let Some(ref url) = self.artwork_url {
+            if url.contains("{width}") || url.contains("{height}") {
+                self.artwork_url = Some(resolve_artwork_url(url, 480, 480));
+            }
+        }
+    }
+}
+
+impl Artist {
+    pub fn resolve_artwork(&mut self) {
+        if let Some(ref url) = self.picture_url {
+            if url.contains("{width}") || url.contains("{height}") {
+                self.picture_url = Some(resolve_artwork_url(url, 480, 480));
+            }
+        }
+    }
+}
+
+impl Playlist {
+    pub fn resolve_artwork(&mut self) {
+        if let Some(ref url) = self.artwork_url {
+            if url.contains("{width}") || url.contains("{height}") {
+                self.artwork_url = Some(resolve_artwork_url(url, 480, 480));
+            }
+        }
+    }
+}
+
+impl SearchResults {
+    /// Resolve all artwork URL placeholders in search results.
+    pub fn resolve_all_artwork(&mut self) {
+        for track in &mut self.tracks {
+            track.resolve_artwork();
+        }
+        for album in &mut self.albums {
+            album.resolve_artwork();
+        }
+        for artist in &mut self.artists {
+            artist.resolve_artwork();
+        }
+        for playlist in &mut self.playlists {
+            playlist.resolve_artwork();
+        }
     }
 }

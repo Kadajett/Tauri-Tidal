@@ -60,11 +60,8 @@ pub async fn login(state: State<'_, AppState>) -> Result<DeviceAuthResponse, App
     let client_id = config.client_id.clone();
     drop(config);
 
-    let device_auth = auth::request_device_code(
-        state.tidal_client.http_client(),
-        &client_id,
-    )
-    .await?;
+    let device_auth =
+        auth::request_device_code(state.tidal_client.http_client(), &client_id).await?;
 
     log::info!(
         "Device auth: user_code={}, verification_uri={}",
@@ -93,12 +90,8 @@ pub async fn poll_login(state: State<'_, AppState>) -> Result<AuthStatus, AppErr
     let client_id = config.client_id.clone();
     drop(config);
 
-    let result = auth::poll_device_token(
-        state.tidal_client.http_client(),
-        &client_id,
-        &device_code,
-    )
-    .await?;
+    let result =
+        auth::poll_device_token(state.tidal_client.http_client(), &client_id, &device_code).await?;
 
     match result {
         Some(token_response) => {
@@ -111,8 +104,7 @@ pub async fn poll_login(state: State<'_, AppState>) -> Result<AuthStatus, AppErr
                 config.refresh_token = Some(rt);
             }
             config.expires_at = Some(
-                chrono::Utc::now()
-                    + chrono::Duration::seconds(token_response.expires_in as i64),
+                chrono::Utc::now() + chrono::Duration::seconds(token_response.expires_in as i64),
             );
             if let Some(user_id) = &token_response.user_id {
                 config.user_id = Some(user_id.to_string());
@@ -126,9 +118,7 @@ pub async fn poll_login(state: State<'_, AppState>) -> Result<AuthStatus, AppErr
             let display_name = match state.tidal_client.get_user_profile().await {
                 Ok((username, first_name, last_name)) => {
                     let name = match (&first_name, &last_name) {
-                        (Some(f), Some(l)) if !f.is_empty() => {
-                            Some(format!("{} {}", f, l))
-                        }
+                        (Some(f), Some(l)) if !f.is_empty() => Some(format!("{} {}", f, l)),
                         (Some(f), _) if !f.is_empty() => Some(f.clone()),
                         _ => username.clone(),
                     };

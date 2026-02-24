@@ -127,10 +127,7 @@ pub async fn request_device_code(
     http: &reqwest::Client,
     client_id: &str,
 ) -> AppResult<crate::api::models::DeviceAuthResponse> {
-    let params = [
-        ("client_id", client_id),
-        ("scope", "r_usr w_usr"),
-    ];
+    let params = [("client_id", client_id), ("scope", "r_usr w_usr")];
 
     let response = http.post(DEVICE_AUTH_URL).form(&params).send().await?;
 

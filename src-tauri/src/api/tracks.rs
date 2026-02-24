@@ -142,7 +142,10 @@ impl TidalClient {
             _ => "HIGH",
         };
 
-        let url = format!("{}/tracks/{}/playbackinfopostpaywall", V1_BASE_URL, track_id);
+        let url = format!(
+            "{}/tracks/{}/playbackinfopostpaywall",
+            V1_BASE_URL, track_id
+        );
         log::info!(
             "Fetching v1 playback info: {} quality={}",
             url,

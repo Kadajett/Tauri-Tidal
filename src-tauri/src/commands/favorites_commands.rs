@@ -9,7 +9,11 @@ pub async fn get_favorites(
     state: State<'_, AppState>,
     cursor: Option<String>,
 ) -> Result<FavoritesPage, AppError> {
-    state.tidal_client.get_favorites(cursor.as_deref()).await
+    let mut page = state.tidal_client.get_favorites(cursor.as_deref()).await?;
+    for track in &mut page.tracks {
+        track.resolve_artwork();
+    }
+    Ok(page)
 }
 
 #[tauri::command]

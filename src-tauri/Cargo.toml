@@ -1,7 +1,7 @@
 [package]
 name = "mactidalplayer"
 version = "0.1.0"
-description = "A macOS Tidal music player"
+description = "A cross-platform Tidal music player"
 authors = ["you"]
 edition = "2021"
 
@@ -31,13 +31,6 @@ symphonia = { version = "0.5", features = ["all"] }
 # Audio output
 cpal = "0.15"
 
-# macOS native integration
-objc2 = "0.6"
-objc2-foundation = "0.3"
-objc2-media-player = "0.3"
-block2 = "0.6"
-dispatch = "0.2"
-
 # Utilities
 base64 = "0.22"
 url = "2"
@@ -51,3 +44,10 @@ env_logger = "0.11"
 dirs = "6"
 sha2 = "0.10"
 urlencoding = "2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = "0.3"
+objc2-media-player = "0.3"
+block2 = "0.6"
+dispatch = "0.2"

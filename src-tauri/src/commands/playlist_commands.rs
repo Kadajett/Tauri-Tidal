@@ -6,7 +6,11 @@ use crate::AppState;
 
 #[tauri::command]
 pub async fn get_playlists(state: State<'_, AppState>) -> Result<Vec<Playlist>, AppError> {
-    state.tidal_client.get_playlists().await
+    let mut playlists = state.tidal_client.get_playlists().await?;
+    for playlist in &mut playlists {
+        playlist.resolve_artwork();
+    }
+    Ok(playlists)
 }
 
 #[tauri::command]
@@ -14,7 +18,9 @@ pub async fn get_playlist(
     state: State<'_, AppState>,
     playlist_id: String,
 ) -> Result<Playlist, AppError> {
-    state.tidal_client.get_playlist(&playlist_id).await
+    let mut playlist = state.tidal_client.get_playlist(&playlist_id).await?;
+    playlist.resolve_artwork();
+    Ok(playlist)
 }
 
 #[tauri::command]
@@ -22,7 +28,11 @@ pub async fn get_playlist_tracks(
     state: State<'_, AppState>,
     playlist_id: String,
 ) -> Result<Vec<Track>, AppError> {
-    state.tidal_client.get_playlist_tracks(&playlist_id).await
+    let mut tracks = state.tidal_client.get_playlist_tracks(&playlist_id).await?;
+    for track in &mut tracks {
+        track.resolve_artwork();
+    }
+    Ok(tracks)
 }
 
 #[tauri::command]
