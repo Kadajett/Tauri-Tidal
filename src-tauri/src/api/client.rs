@@ -15,7 +15,7 @@ pub struct TidalClient {
 impl TidalClient {
     pub fn new(config: Arc<RwLock<AppConfig>>) -> AppResult<Self> {
         let http = reqwest::Client::builder()
-            .user_agent("MacTidal/0.1.0")
+            .user_agent("TauriTidal/0.1.0")
             .build()?;
 
         Ok(Self { http, config })

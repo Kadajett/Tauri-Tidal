@@ -61,7 +61,7 @@ impl AppConfig {
     pub fn config_dir() -> AppResult<PathBuf> {
         let home = dirs::home_dir()
             .ok_or_else(|| AppError::Config("Cannot find home directory".into()))?;
-        Ok(home.join(".mactidal"))
+        Ok(home.join(".tauritidal"))
     }
 
     pub fn config_path() -> AppResult<PathBuf> {

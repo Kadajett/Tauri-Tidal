@@ -131,7 +131,7 @@ Three authentication modes, tried in order during startup:
 2. **Client credentials** (no user, has client_secret): acquire a catalog-only token for browsing (30-second previews).
 3. **Unauthenticated**: prompt the user to log in.
 
-The primary login flow is **device code auth**: the backend requests a device code from Tidal, the frontend displays a user code and verification URL, and the backend polls until the user authorizes. A **PKCE flow** with deep-link callback (`mactidalplayer://auth/callback`) exists as a fallback.
+The primary login flow is **device code auth**: the backend requests a device code from Tidal, the frontend displays a user code and verification URL, and the backend polls until the user authorizes. A **PKCE flow** with deep-link callback (`tauritidal://auth/callback`) exists as a fallback.
 
 Token refresh happens automatically. Every API request checks for 401, refreshes the token, and retries once.
 
@@ -145,7 +145,7 @@ API responses follow JSON:API format. The `api/models.rs` file defines the core 
 
 - **Shuffle**: randomizes track order while keeping the current track at index 0. The original order is saved and restored when shuffle is disabled.
 - **Repeat modes**: Off (stop at end), All (wrap to start), One (repeat current track forever).
-- **Persistence**: the full queue state (both shuffled and original order) serializes to `~/.mactidal/queue.json` and restores on startup.
+- **Persistence**: the full queue state (both shuffled and original order) serializes to `~/.tauritidal/queue.json` and restores on startup.
 
 ## macOS Integration
 
@@ -178,7 +178,7 @@ Errors serialize to `{ "kind": "...", "message": "..." }` so the frontend can ha
 
 ## Config Persistence
 
-`AppConfig` (`config.rs`) stores all persistent app state in `~/.mactidal/config.json`:
+`AppConfig` (`config.rs`) stores all persistent app state in `~/.tauritidal/config.json`:
 
 - Auth tokens (access, refresh, expiration timestamp)
 - User profile (ID, display name, country code)

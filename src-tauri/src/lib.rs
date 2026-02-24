@@ -40,7 +40,7 @@ pub struct AppState {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     env_logger::Builder::from_env(
-        env_logger::Env::default().default_filter_or("mactidalplayer=info"),
+        env_logger::Env::default().default_filter_or("tauritidal=info"),
     )
     .init();
 
@@ -51,7 +51,7 @@ pub fn run() {
         use std::io::Write;
         let crash_path = dirs::home_dir()
             .unwrap_or_default()
-            .join(".mactidal")
+            .join(".tauritidal")
             .join("crash.log");
         let _ = std::fs::create_dir_all(crash_path.parent().unwrap());
         let msg = format!(

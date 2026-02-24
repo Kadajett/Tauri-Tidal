@@ -2280,39 +2280,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mactidalplayer"
-version = "0.1.0"
-dependencies = [
- "base64 0.22.1",
- "block2",
- "chrono",
- "cpal",
- "dirs",
- "dispatch",
- "env_logger",
- "futures-util",
- "log",
- "objc2",
- "objc2-foundation",
- "objc2-media-player",
- "rand 0.8.5",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "sha2",
- "symphonia",
- "tauri",
- "tauri-build",
- "tauri-plugin-deep-link",
- "tauri-plugin-opener",
- "thiserror 2.0.18",
- "tokio",
- "url",
- "urlencoding",
- "uuid",
-]
-
-[[package]]
 name = "markup5ever"
 version = "0.14.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4689,6 +4656,39 @@ dependencies = [
  "dunce",
  "embed-resource",
  "toml 0.9.12+spec-1.1.0",
+]
+
+[[package]]
+name = "tauritidal"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "block2",
+ "chrono",
+ "cpal",
+ "dirs",
+ "dispatch",
+ "env_logger",
+ "futures-util",
+ "log",
+ "objc2",
+ "objc2-foundation",
+ "objc2-media-player",
+ "rand 0.8.5",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha2",
+ "symphonia",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-deep-link",
+ "tauri-plugin-opener",
+ "thiserror 2.0.18",
+ "tokio",
+ "url",
+ "urlencoding",
+ "uuid",
 ]
 
 [[package]]

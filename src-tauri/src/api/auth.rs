@@ -10,7 +10,7 @@ use tokio::sync::RwLock;
 
 const AUTH_URL: &str = "https://login.tidal.com/authorize";
 const TOKEN_URL: &str = "https://auth.tidal.com/v1/oauth2/token";
-const REDIRECT_URI: &str = "mactidalplayer://auth/callback";
+const REDIRECT_URI: &str = "tauritidal://auth/callback";
 
 pub struct PkceChallenge {
     pub verifier: String,

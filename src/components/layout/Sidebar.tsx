@@ -38,7 +38,7 @@ export function Sidebar() {
   return (
     <div className="flex h-full w-56 flex-col border-r border-border bg-card">
       <div className="p-4">
-        <h1 className="text-lg/6 font-bold">MacTidal</h1>
+        <h1 className="text-lg/6 font-bold">TauriTidal</h1>
       </div>
 
       {!checking && (

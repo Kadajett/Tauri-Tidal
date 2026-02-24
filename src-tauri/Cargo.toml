@@ -1,12 +1,12 @@
 [package]
-name = "mactidalplayer"
+name = "tauritidal"
 version = "0.1.0"
 description = "A cross-platform Tidal music player"
 authors = ["you"]
 edition = "2021"
 
 [lib]
-name = "mactidalplayer_lib"
+name = "tauritidal_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

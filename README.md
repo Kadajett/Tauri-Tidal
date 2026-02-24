@@ -74,7 +74,7 @@ For a detailed walkthrough of the audio pipeline, state management, and IPC surf
 - PKCE with deep-link callback as fallback
 - Client credentials mode for unauthenticated catalog browsing
 - Automatic token refresh on 401 responses
-- Credentials stored locally in `~/.mactidal/config.json`
+- Credentials stored locally in `~/.tauritidal/config.json`
 
 ## Tech Stack
 
@@ -157,7 +157,7 @@ src-tauri/                        # Rust backend
     commands/                     # Tauri IPC handlers: auth, playback, queue, search,
                                   # playlist, favorites, browse
     macos/                        # Now Playing and media key handlers via objc2
-    config.rs                     # App config persistence (~/.mactidal/config.json)
+    config.rs                     # App config persistence (~/.tauritidal/config.json)
     events.rs                     # Event payload types for frontend communication
     error.rs                      # Unified error type (AppError enum)
     lib.rs                        # Tauri app setup, AppState, command registration
@@ -184,14 +184,14 @@ docs/
 
 ## Configuration
 
-App config is stored at `~/.mactidal/config.json` and includes:
+App config is stored at `~/.tauritidal/config.json` and includes:
 
 - Auth tokens (access token, refresh token, expiration)
 - User profile (user ID, display name, country code)
 - Audio quality preference (default: `LOSSLESS`)
 - Volume and mute state
 
-Queue state persists separately in `~/.mactidal/queue.json`, including track order, current position, shuffle state, and repeat mode. Both files are created automatically on first use.
+Queue state persists separately in `~/.tauritidal/queue.json`, including track order, current position, shuffle state, and repeat mode. Both files are created automatically on first use.
 
 ## Development
 
